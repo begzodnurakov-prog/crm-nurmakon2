@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block title %}Davomat | Crm_nurmakon{% endblock %}
+{% block content %}
+<header class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4"><div><p class="section-kicker mb-1">{{ class_session.group.name }}</p><h1 class="page-heading mb-1">Dars davomati</h1><div class="text-secondary">{{ class_session.starts_at.strftime('%d.%m.%Y %H:%M') }}{% if class_session.topic %} · {{ class_session.topic }}{% endif %}</div></div><a class="btn btn-outline-secondary" href="{{ url_for('sessions') }}">Darslar ro'yxati</a></header>
+<section class="card section-card"><form method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>O'quvchi</th><th>Telefon</th><th>Davomat</th></tr></thead><tbody>
+{% for student in students %}{% set record=records.get(student.id) %}<tr><td class="fw-semibold">{{ student.name }}</td><td>{{ student.phone }}</td><td><label class="visually-hidden" for="status_{{ student.id }}">{{ student.name }} holati</label><select class="form-select attendance-select" id="status_{{ student.id }}" name="status_{{ student.id }}" required><option value="" disabled {% if not record %}selected{% endif %}>Tanlang</option><option value="present" {% if record and record.status=='present' %}selected{% endif %}>Keldi</option><option value="absent" {% if record and record.status=='absent' %}selected{% endif %}>Kelmadi</option><option value="late" {% if record and record.status=='late' %}selected{% endif %}>Kechikdi</option></select></td></tr>
+{% else %}<tr><td colspan="3" class="empty-state">Guruhda faol o'quvchilar yo'q.</td></tr>{% endfor %}
+</tbody></table></div>{% if students %}<div class="card-body border-top"><button class="btn btn-primary" type="submit"><i class="bi bi-check2-circle me-1" aria-hidden="true"></i>Davomatni saqlash</button></div>{% endif %}</form></section>
+{% endblock %}

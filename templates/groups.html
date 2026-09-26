@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Guruhlar | Crm_nurmakon{% endblock %}
+{% block content %}
+<header class="mb-4"><p class="section-kicker mb-1">ADMINISTRATOR</p><h1 class="page-heading mb-0">Guruhlar</h1></header>
+<div class="row g-4"><div class="col-xl-8"><section class="card section-card"><div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Guruh</th><th>Kurs</th><th>O'qituvchi</th><th>Jadval</th><th>O'quvchilar</th><th>Holat</th><th></th></tr></thead><tbody>
+{% for group in groups %}<tr><td class="fw-semibold">{{ group.name }}</td><td>{{ group.course_name }}</td><td>{{ group.teacher.full_name if group.teacher else 'Tayinlanmagan' }}</td><td>{{ group.schedule or '-' }}</td><td>{{ group.students|length }}</td><td><span class="badge text-bg-{{ 'success' if group.is_active else 'secondary' }}">{{ 'Faol' if group.is_active else 'Faol emas' }}</span></td><td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('edit_group',group_id=group.id) }}" aria-label="Tahrirlash"><i class="bi bi-pencil" aria-hidden="true"></i></a></td></tr>
+{% else %}<tr><td colspan="7" class="empty-state">Guruhlar mavjud emas.</td></tr>{% endfor %}
+</tbody></table></div></section></div>
+<div class="col-xl-4"><section class="card section-card"><div class="card-body"><h2 class="section-title mb-3">Yangi guruh</h2><form method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="mb-3"><label class="form-label" for="name">Guruh nomi</label><input class="form-control" id="name" name="name" required></div><div class="mb-3"><label class="form-label" for="course_name">Kurs</label><input class="form-control" id="course_name" name="course_name" required></div><div class="mb-3"><label class="form-label" for="teacher_id">O'qituvchi</label><select class="form-select" id="teacher_id" name="teacher_id"><option value="">Tayinlanmagan</option>{% for teacher in teachers %}<option value="{{ teacher.id }}">{{ teacher.full_name }}</option>{% endfor %}</select></div><div class="mb-3"><label class="form-label" for="schedule">Dars jadvali</label><input class="form-control" id="schedule" name="schedule" placeholder="Dush / Chor 18:00"></div><button class="btn btn-primary w-100" type="submit">Guruh yaratish</button>
+</form></div></section></div></div>
+{% endblock %}

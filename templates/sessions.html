@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Darslar | Crm_nurmakon{% endblock %}
+{% block content %}
+<header class="mb-4"><p class="section-kicker mb-1">O'QITUVCHI PORTALI</p><h1 class="page-heading mb-0">Darslar va davomat</h1></header>
+<div class="row g-4"><div class="col-xl-8"><section class="card section-card"><div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Sana va vaqt</th><th>Guruh</th><th>Mavzu</th><th>O'qituvchi</th><th></th></tr></thead><tbody>
+{% for class_session in sessions %}<tr><td class="text-nowrap">{{ class_session.starts_at.strftime('%d.%m.%Y %H:%M') }}</td><td class="fw-semibold">{{ class_session.group.name }}</td><td>{{ class_session.topic or '-' }}</td><td>{{ class_session.group.teacher.full_name if class_session.group.teacher else '-' }}</td><td><a class="btn btn-sm btn-primary" href="{{ url_for('session_attendance',session_id=class_session.id) }}">Davomat</a></td></tr>
+{% else %}<tr><td colspan="5" class="empty-state">Darslar rejalashtirilmagan.</td></tr>{% endfor %}
+</tbody></table></div></section></div>
+<div class="col-xl-4"><section class="card section-card"><div class="card-body"><h2 class="section-title mb-3">Dars rejalashtirish</h2>{% if groups %}<form method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="mb-3"><label class="form-label" for="group_id">Guruh</label><select class="form-select" name="group_id" id="group_id" required>{% for group in groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}</select></div><div class="mb-3"><label class="form-label" for="starts_at">Sana va vaqt</label><input class="form-control" type="datetime-local" name="starts_at" id="starts_at" required></div><div class="mb-3"><label class="form-label" for="topic">Mavzu</label><input class="form-control" name="topic" id="topic" maxlength="200"></div><button class="btn btn-primary w-100" type="submit">Dars yaratish</button></form>{% else %}<p class="text-secondary mb-0">Sizga tayinlangan faol guruhlar yo'q.</p>{% endif %}</div></section></div></div>
+{% endblock %}

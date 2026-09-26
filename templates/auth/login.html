@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}Kirish | Crm_nurmakon{% endblock %}
+{% block content %}
+<div class="row justify-content-center py-4 py-lg-5">
+    <div class="col-sm-10 col-md-7 col-lg-5 col-xl-4">
+        <section class="card section-card">
+            <div class="card-body p-4 p-lg-5">
+                <p class="section-kicker mb-1">NURMAKON CRM</p>
+                <h1 class="page-heading mb-2">Tizimga kirish</h1>
+                <p class="text-secondary mb-4">Hisob ma'lumotlaringizni kiriting.</p>
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3"><label class="form-label" for="email">Email</label><input class="form-control" id="email" name="email" type="email" autocomplete="username" required></div>
+                    <div class="mb-3"><label class="form-label" for="password">Parol</label><input class="form-control" id="password" name="password" type="password" autocomplete="current-password" required></div>
+                    <div class="form-check mb-4"><input class="form-check-input" id="remember" name="remember" type="checkbox"><label class="form-check-label" for="remember">Meni eslab qol</label></div>
+                    <button class="btn btn-primary w-100" type="submit">Kirish</button>
+                </form>
+                <p class="small text-secondary text-center mt-4 mb-0">Yangi ota-ona hisobi? <a href="{{ url_for('register') }}">Ro'yxatdan o'tish</a></p>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

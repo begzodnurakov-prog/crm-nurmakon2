@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="uz">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#155c49">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Nurmakon CRM | O'quv markazi</title>
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='pwa/icon.svg') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+          crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --ink: #20302a;
+            --muted: #718078;
+            --canvas: #f3f6f3;
+            --line: #e2e9e4;
+            --green: #176b55;
+            --green-dark: #10513f;
+            --green-soft: #e9f4ee;
+            --coral: #d66e50;
+        }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #d4fc79 0%, #e8f6c9 48%, #f6d365 100%);
+            background-attachment: fixed;
+            color: var(--ink);
+            font-family: 'DM Sans', sans-serif;
+        }
+
+        .navbar { background: #fff; }
+        .brand-mark {
+            display: inline-grid;
+            width: 2.25rem;
+            height: 2.25rem;
+            place-items: center;
+            border-radius: 8px;
+            background: var(--green);
+            color: #fff;
+            font-weight: 700;
+        }
+        .page-heading { font-size: 1.75rem; font-weight: 700; }
+        .section-card {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            box-shadow: 0 5px 18px rgba(32, 48, 42, .045);
+        }
+        .section-title { font-size: 1.05rem; font-weight: 700; }
+        .section-kicker { color: var(--muted); font-size: .875rem; }
+        .form-label { color: #46564e; font-size: .9rem; font-weight: 600; }
+        .form-control, .form-select { border-color: #d7e0da; }
+        .form-control:focus, .form-select:focus {
+            border-color: #78ae98;
+            box-shadow: 0 0 0 .2rem rgba(23, 107, 85, .13);
+        }
+        .btn-primary {
+            --bs-btn-bg: var(--green);
+            --bs-btn-border-color: var(--green);
+            --bs-btn-hover-bg: var(--green-dark);
+            --bs-btn-hover-border-color: var(--green-dark);
+            --bs-btn-active-bg: var(--green-dark);
+            --bs-btn-active-border-color: var(--green-dark);
+        }
+        .btn-outline-secondary {
+            --bs-btn-color: #526159;
+            --bs-btn-border-color: #cbd6ce;
+            --bs-btn-hover-bg: #edf2ee;
+            --bs-btn-hover-color: var(--ink);
+            --bs-btn-hover-border-color: #cbd6ce;
+        }
+        .table { --bs-table-bg: transparent; margin-bottom: 0; }
+        .table thead th {
+            background: #f5f8f5;
+            color: #536259;
+            font-size: .8rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .table > :not(caption) > * > * { padding: .8rem 1rem; }
+        .table tbody tr:last-child > * { border-bottom: 0; }
+        .table-responsive { border-radius: 0 0 8px 8px; }
+        .attendance-select { min-width: 145px; }
+        .status-paid { background: var(--green-soft); color: var(--green-dark); }
+        .status-unpaid { background: #fff1e9; color: #a84c2f; }
+        .empty-state { color: var(--muted); padding: 1.75rem !important; text-align: center; }
+        .alert { border: 0; border-radius: 8px; }
+        .chart-frame { position: relative; min-height: 280px; }
+
+        @media (max-width: 575.98px) {
+            .page-heading { font-size: 1.45rem; }
+            .table > :not(caption) > * > * { padding: .7rem .75rem; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar border-bottom">
+        <div class="container-xxl py-1">
+            <a class="navbar-brand d-flex align-items-center gap-2 mb-0" href="{{ url_for('index') }}">
+                <span class="brand-mark">N</span>
+                <span class="fw-bold">Nurmakon <span class="text-secondary fw-normal">CRM</span></span>
+            </a>
+            <span class="small text-secondary d-none d-sm-inline">O'quv markazi</span>
+            <button class="btn btn-sm btn-outline-primary d-none" id="installAppButton" type="button">
+                <i class="bi bi-download me-1" aria-hidden="true"></i>Ilovani o'rnatish
+            </button>
+        </div>
+    </nav>
+
+    <main class="container-xxl py-4 py-lg-5">
+        <header class="d-flex flex-wrap align-items-end justify-content-between gap-3 mb-4">
+            <div>
+                <p class="section-kicker mb-1">BOSHQARUV</p>
+                <h1 class="page-heading mb-0">O'quvchilar</h1>
+            </div>
+            <div class="small text-secondary">
+                Jami <span class="badge rounded-pill text-bg-light border ms-1">{{ students|length }}</span>
+            </div>
+        </header>
+
+        <section class="card section-card mb-4">
+            <div class="card-body">
+                <h2 class="section-title">To'lovlar taqsimoti</h2>
+                <div class="chart-frame">
+                    <canvas id="paymentStatusChart" data-chart-values="{{ [payments|selectattr('status', 'equalto', 'paid')|list|length, payments|selectattr('status', 'equalto', 'pending')|list|length]|tojson }}" role="img" aria-label="To'langan va kutilayotgan to'lovlar diagrammasi"></canvas>
+                </div>
+            </div>
+        </section>
+
+        {% for category, message in get_flashed_messages(with_categories=true) %}
+        <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show mb-4" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Yopish"></button>
+        </div>
+        {% endfor %}
+
+        <div class="row g-4">
+            <div class="col-xl-8">
+                <section class="card section-card mb-4">
+                    <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+                        <div>
+                            <h2 class="section-title mb-1">Kunlik davomat</h2>
+                            <p class="section-kicker mb-0">{{ attendance_date }}</p>
+                        </div>
+                        <form class="d-flex align-items-center gap-2" method="GET" action="{{ url_for('index') }}">
+                            <input type="hidden" name="q" value="{{ search_query }}">
+                            <label class="visually-hidden" for="attendance_date">Davomat sanasi</label>
+                            <input id="attendance_date" class="form-control" type="date" name="attendance_date"
+                                   value="{{ attendance_date }}" required>
+                            <button class="btn btn-outline-secondary text-nowrap" type="submit">
+                                <i class="bi bi-calendar3 me-1" aria-hidden="true"></i>Ko'rsatish
+                            </button>
+                        </form>
+                    </div>
+                    <form method="POST" action="{{ url_for('save_attendance') }}">
+                        <input type="hidden" name="attendance_date" value="{{ attendance_date }}">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead>
+                                    <tr><th>O'quvchi</th><th>Kurs</th><th>Holati</th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for student in students %}
+                                    {% set record = attendance_by_student.get(student.id) %}
+                                    <tr>
+                                        <td class="fw-semibold">{{ student.name }}</td>
+                                        <td class="text-secondary">{{ student.course }}</td>
+                                        <td>
+                                            <label class="visually-hidden" for="status_{{ student.id }}">{{ student.name }} davomat holati</label>
+                                            <select id="status_{{ student.id }}" class="form-select form-select-sm attendance-select"
+                                                    name="status_{{ student.id }}" required>
+                                                <option value="" disabled {% if not record %}selected{% endif %}>Tanlang</option>
+                                                <option value="present" {% if record and record.status == 'present' %}selected{% endif %}>Keldi</option>
+                                                <option value="absent" {% if record and record.status == 'absent' %}selected{% endif %}>Kelmadi</option>
+                                            </select>
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr><td class="empty-state" colspan="3">Davomat uchun o'quvchilar yo'q.</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% if students %}
+                        <div class="card-body border-top py-3">
+                            <button class="btn btn-primary" type="submit">
+                                <i class="bi bi-check2-circle me-1" aria-hidden="true"></i>Davomatni saqlash
+                            </button>
+                        </div>
+                        {% endif %}
+                    </form>
+                </section>
+
+                <section class="card section-card">
+                    <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+                        <div>
+                            <h2 class="section-title mb-1">O'quvchilar ro'yxati</h2>
+                            <span class="small text-secondary">
+                                {{ filtered_students|length }} ta{% if search_query %} natija{% else %} o'quvchi{% endif %}
+                            </span>
+                        </div>
+                        <form class="d-flex flex-grow-1 gap-2" method="GET" action="{{ url_for('index') }}"
+                              role="search" style="max-width: 430px;">
+                            <input type="hidden" name="attendance_date" value="{{ attendance_date }}">
+                            <label class="visually-hidden" for="student_search">Ism yoki telefon bo'yicha qidirish</label>
+                            <input id="student_search" class="form-control" type="search" name="q"
+                                   value="{{ search_query }}" placeholder="Ism yoki telefon raqami">
+                            <button class="btn btn-primary text-nowrap" type="submit">
+                                <i class="bi bi-search me-sm-1" aria-hidden="true"></i><span class="d-none d-sm-inline">Qidirish</span>
+                            </button>
+                            {% if search_query %}
+                            <a class="btn btn-outline-secondary" href="{{ url_for('index', attendance_date=attendance_date) }}"
+                               aria-label="Qidiruvni tozalash" title="Qidiruvni tozalash">
+                                <i class="bi bi-x-lg" aria-hidden="true"></i>
+                            </a>
+                            {% endif %}
+                        </form>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr><th>ID</th><th>F.I.Sh.</th><th>Kurs</th><th>Telefon</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for student in filtered_students %}
+                                <tr>
+                                    <td class="text-secondary">{{ student.id }}</td>
+                                    <td class="fw-semibold">{{ student.name }}</td>
+                                    <td>{{ student.course }}</td>
+                                    <td class="text-nowrap">{{ student.phone }}</td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td class="empty-state" colspan="4">
+                                        {% if search_query %}
+                                        Qidiruv bo'yicha o'quvchi topilmadi.
+                                        {% else %}
+                                        Hozircha o'quvchilar yo'q.
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <aside class="col-xl-4">
+                <section class="card section-card mb-4">
+                    <div class="card-body">
+                        <h2 class="section-title mb-3">Yangi o'quvchi</h2>
+                        <form method="POST" action="{{ url_for('index') }}">
+                            <div class="mb-3">
+                                <label class="form-label" for="name">F.I.Sh.</label>
+                                <input class="form-control" id="name" type="text" name="name" placeholder="Ism Familiya" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" for="course">Kurs</label>
+                                <input class="form-control" id="course" type="text" name="course" placeholder="Masalan: Matematika" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" for="phone">Telefon</label>
+                                <input class="form-control" id="phone" type="tel" name="phone" placeholder="+998 ..." required>
+                            </div>
+                            <button class="btn btn-primary w-100" type="submit">
+                                <i class="bi bi-person-plus me-1" aria-hidden="true"></i>O'quvchi qo'shish
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <section class="card section-card">
+                    <div class="card-body">
+                        <h2 class="section-title mb-3">To'lov qo'shish</h2>
+                        <form method="POST" action="{{ url_for('add_payment') }}">
+                            <div class="mb-3">
+                                <label class="form-label" for="student_id">O'quvchi</label>
+                                <select class="form-select" id="student_id" name="student_id" required>
+                                    <option value="">O'quvchini tanlang</option>
+                                    {% for student in students %}
+                                    <option value="{{ student.id }}">{{ student.name }} ({{ student.course }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" for="amount">Summa</label>
+                                <input class="form-control" id="amount" type="number" name="amount"
+                                       min="0.01" step="0.01" placeholder="500000" required>
+                            </div>
+                            <div class="row g-3 mb-3">
+                                <div class="col-sm-6">
+                                    <label class="form-label" for="month">Oy</label>
+                                    <input class="form-control" id="month" type="month" name="month" required>
+                                </div>
+                                <div class="col-sm-6">
+                                    <label class="form-label" for="status">Holati</label>
+                                    <select class="form-select" id="status" name="status" required>
+                                        <option value="paid">To'langan</option>
+                                        <option value="unpaid">To'lanmagan</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary w-100" type="submit">
+                                <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>To'lovni saqlash
+                            </button>
+                        </form>
+                    </div>
+                </section>
+            </aside>
+
+            <div class="col-12">
+                <section class="card section-card">
+                    <div class="card-body d-flex align-items-center justify-content-between">
+                        <h2 class="section-title mb-0">To'lovlar tarixi</h2>
+                        <span class="small text-secondary">{{ payments|length }} ta</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr><th>O'quvchi</th><th>Kurs</th><th>Oy</th><th>Summa</th><th>Holati</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for payment in payments %}
+                                <tr>
+                                    <td class="fw-semibold">{{ payment.student.name }}</td>
+                                    <td>{{ payment.student.course }}</td>
+                                    <td>{{ payment.month }}</td>
+                                    <td class="text-nowrap">{{ '{:,.2f}'.format(payment.amount) }}</td>
+                                    <td>
+                                        {% if payment.status == 'paid' %}
+                                        <span class="badge rounded-pill status-paid">To'langan</span>
+                                        {% else %}
+                                        <span class="badge rounded-pill status-unpaid">To'lanmagan</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td class="empty-state" colspan="5">Hozircha to'lovlar yo'q.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <script>
+        const paymentChart = document.getElementById('paymentStatusChart');
+        if (paymentChart) {
+            new Chart(paymentChart, {
+                type: 'doughnut',
+                data: {
+                    labels: ["To'langan", 'Kutilmoqda'],
+                    datasets: [{
+                        data: JSON.parse(paymentChart.dataset.chartValues),
+                        backgroundColor: ['#176b55', '#e7b84b'],
+                        borderColor: '#ffffff',
+                        borderWidth: 3,
+                    }],
+                },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '68%' },
+            });
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+            integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+            crossorigin="anonymous"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+                    .catch((error) => console.error('Service worker registration failed:', error));
+            });
+        }
+
+        let deferredInstallPrompt = null;
+        const installButton = document.getElementById('installAppButton');
+        window.addEventListener('beforeinstallprompt', (event) => {
+            event.preventDefault();
+            deferredInstallPrompt = event;
+            installButton?.classList.remove('d-none');
+        });
+        installButton?.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) return;
+            deferredInstallPrompt.prompt();
+            await deferredInstallPrompt.userChoice;
+            deferredInstallPrompt = null;
+            installButton.classList.add('d-none');
+        });
+        window.addEventListener('appinstalled', () => {
+            installButton?.classList.add('d-none');
+            deferredInstallPrompt = null;
+        });
+    </script>
+</body>
+</html>

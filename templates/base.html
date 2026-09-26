@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="uz">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#155c49">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>{% block title %}Crm_nurmakon{% endblock %}</title>
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='pwa/icon.svg') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root { --ink:#20302a; --muted:#718078; --canvas:#f3f6f3; --line:#e2e9e4; --green:#176b55; --green-dark:#10513f; --green-soft:#e9f4ee; }
+        body { min-height:100vh; background:linear-gradient(135deg,#d4fc79 0%,#e8f6c9 48%,#f6d365 100%); background-attachment:fixed; color:var(--ink); font-family:'DM Sans',sans-serif; }
+        .navbar { background:#fff; }
+        .brand-mark { display:inline-grid; width:2.25rem; height:2.25rem; place-items:center; border-radius:8px; background:var(--green); color:#fff; font-weight:700; }
+        .page-heading { font-size:1.75rem; font-weight:700; }
+        .section-card { border:1px solid var(--line); border-radius:8px; box-shadow:0 5px 18px rgba(32,48,42,.045); }
+        .section-title { font-size:1.05rem; font-weight:700; }
+        .section-kicker { color:var(--muted); font-size:.875rem; }
+        .form-label { color:#46564e; font-size:.9rem; font-weight:600; }
+        .form-control,.form-select { border-color:#d7e0da; }
+        .form-control:focus,.form-select:focus { border-color:#78ae98; box-shadow:0 0 0 .2rem rgba(23,107,85,.13); }
+        .btn-primary { --bs-btn-bg:var(--green); --bs-btn-border-color:var(--green); --bs-btn-hover-bg:var(--green-dark); --bs-btn-hover-border-color:var(--green-dark); }
+        .table { --bs-table-bg:transparent; margin-bottom:0; }
+        .table thead th { background:#f5f8f5; color:#536259; font-size:.8rem; font-weight:700; white-space:nowrap; }
+        .table>:not(caption)>*>* { padding:.8rem 1rem; }
+        .table tbody tr:last-child>* { border-bottom:0; }
+        .table-responsive { border-radius:0 0 8px 8px; }
+        .empty-state { color:var(--muted); padding:1.75rem!important; text-align:center; }
+        .metric-value { font-size:1.65rem; font-weight:700; }
+        .metric-icon { display:grid; width:2.5rem; height:2.5rem; place-items:center; border-radius:8px; background:var(--green-soft); color:var(--green); font-size:1.15rem; }
+        .chart-frame { position:relative; min-height:260px; }
+        .alert { border:0; border-radius:8px; }
+        @media(max-width:575.98px) { .page-heading{font-size:1.45rem;} .table>:not(caption)>*>*{padding:.7rem .75rem;} }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg border-bottom">
+        <div class="container-xxl py-1">
+            <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('login') }}">
+                <span class="brand-mark">N</span><span class="fw-bold">Nurmakon <span class="text-secondary fw-normal">CRM</span></span>
+            </a>
+            <button class="btn btn-sm btn-outline-primary d-none ms-auto me-2" id="installAppButton" type="button">
+                <i class="bi bi-download me-1" aria-hidden="true"></i>O'rnatish
+            </button>
+            {% if current_user.is_authenticated %}
+            <button class="navbar-toggler ms-auto ms-lg-0" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Navigatsiyani ochish">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="mainNav">
+                <ul class="navbar-nav me-auto ms-lg-4 gap-lg-1">
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Bosh sahifa</a></li>
+                    {% if current_user.role == 'admin' %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('students') }}">O'quvchilar</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('groups') }}">Guruhlar</a></li>
+                    {% endif %}
+                    {% if current_user.role in ('admin','teacher') %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('sessions') }}">Darslar va davomat</a></li>
+                    {% endif %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('payments') }}">To'lovlar</a></li>
+                    <li class="nav-item"><a class="nav-link d-flex align-items-center gap-1" href="{{ url_for('notifications') }}">Bildirishnomalar{% if unread_notification_count %}<span class="badge rounded-pill text-bg-danger">{{ unread_notification_count }}</span>{% endif %}</a></li>
+                    {% if current_user.role == 'student_parent' %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('contact_support') }}">Aloqa / yordam</a></li>
+                    {% endif %}
+                    {% if current_user.role == 'admin' %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('users') }}">Foydalanuvchilar</a></li>
+                    <li class="nav-item"><a class="nav-link d-flex align-items-center gap-1" href="{{ url_for('admin_inquiries') }}">Murojaatlar{% if open_inquiry_count %}<span class="badge rounded-pill text-bg-warning">{{ open_inquiry_count }}</span>{% endif %}</a></li>
+                    {% endif %}
+                </ul>
+                <div class="d-flex align-items-center gap-3 py-2 py-lg-0">
+                    <div class="text-end d-none d-sm-block">
+                        <div class="small fw-semibold">{{ current_user.full_name }}</div>
+                        <div class="small text-secondary">{{ {'admin':'Administrator','teacher':"O'qituvchi",'student_parent':"O'quvchi / ota-ona"}.get(current_user.role, current_user.role) }}</div>
+                    </div>
+                    <form method="POST" action="{{ url_for('logout') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-outline-secondary" type="submit" aria-label="Tizimdan chiqish" title="Tizimdan chiqish"><i class="bi bi-box-arrow-right" aria-hidden="true"></i></button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </nav>
+
+    <main class="container-xxl py-4 py-lg-5">
+        {% for category, message in get_flashed_messages(with_categories=true) %}
+        <div class="alert alert-{{ 'danger' if category == 'error' else ('warning' if category == 'warning' else 'success') }} alert-dismissible fade show mb-4" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Yopish"></button>
+        </div>
+        {% endfor %}
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+            integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    {% block scripts %}{% endblock %}
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+                    .catch((error) => console.error('Service worker registration failed:', error));
+            });
+        }
+
+        let deferredInstallPrompt = null;
+        const installButton = document.getElementById('installAppButton');
+        window.addEventListener('beforeinstallprompt', (event) => {
+            event.preventDefault();
+            deferredInstallPrompt = event;
+            installButton?.classList.remove('d-none');
+        });
+        installButton?.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) return;
+            deferredInstallPrompt.prompt();
+            await deferredInstallPrompt.userChoice;
+            deferredInstallPrompt = null;
+            installButton.classList.add('d-none');
+        });
+        window.addEventListener('appinstalled', () => {
+            installButton?.classList.add('d-none');
+            deferredInstallPrompt = null;
+        });
+    </script>
+</body>
+</html>

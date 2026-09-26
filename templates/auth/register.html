@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Ro'yxatdan o'tish | Crm_nurmakon{% endblock %}
+{% block content %}
+<div class="row justify-content-center py-4 py-lg-5">
+    <div class="col-sm-10 col-md-7 col-lg-5 col-xl-4">
+        <section class="card section-card"><div class="card-body p-4 p-lg-5">
+            <p class="section-kicker mb-1">OTA-ONA HISOBI</p><h1 class="page-heading mb-2">Ro'yxatdan o'tish</h1>
+            <p class="text-secondary mb-4">O'qituvchi va administrator hisoblarini administrator yaratadi.</p>
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="mb-3"><label class="form-label" for="full_name">To'liq ism</label><input class="form-control" id="full_name" name="full_name" autocomplete="name" maxlength="120" required></div>
+                <div class="mb-3"><label class="form-label" for="email">Email</label><input class="form-control" id="email" name="email" type="email" autocomplete="email" required></div>
+                <div class="mb-3"><label class="form-label" for="password">Parol</label><input class="form-control" id="password" name="password" type="password" minlength="12" autocomplete="new-password" required><div class="form-text">Kamida 12 ta belgi.</div></div>
+                <div class="mb-4"><label class="form-label" for="password_confirmation">Parolni takrorlang</label><input class="form-control" id="password_confirmation" name="password_confirmation" type="password" minlength="12" autocomplete="new-password" required></div>
+                <button class="btn btn-primary w-100" type="submit">Hisob yaratish</button>
+            </form>
+            <p class="small text-secondary text-center mt-4 mb-0">Hisobingiz bormi? <a href="{{ url_for('login') }}">Kirish</a></p>
+        </div></section>
+    </div>
+</div>
+{% endblock %}

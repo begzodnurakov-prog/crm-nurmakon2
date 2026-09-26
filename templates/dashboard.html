@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}Bosh sahifa | Crm_nurmakon{% endblock %}
+{% block content %}
+<header class="d-flex flex-wrap align-items-end justify-content-between gap-3 mb-4">
+    <div><p class="section-kicker mb-1">{{ role_label|upper }}</p><h1 class="page-heading mb-0">Bosh sahifa</h1></div>
+    <span class="small text-secondary">{{ today_date }}</span>
+</header>
+<div class="row g-3 mb-4">
+    <div class="col-6 col-xl-3"><section class="card section-card h-100"><div class="card-body d-flex justify-content-between gap-2"><div><div class="section-kicker">O'quvchilar</div><div class="metric-value">{{ student_count }}</div></div><span class="metric-icon"><i class="bi bi-people" aria-hidden="true"></i></span></div></section></div>
+    <div class="col-6 col-xl-3"><section class="card section-card h-100"><div class="card-body d-flex justify-content-between gap-2"><div><div class="section-kicker">Faol guruhlar</div><div class="metric-value">{{ group_count }}</div></div><span class="metric-icon"><i class="bi bi-collection" aria-hidden="true"></i></span></div></section></div>
+    <div class="col-6 col-xl-3"><section class="card section-card h-100"><div class="card-body d-flex justify-content-between gap-2"><div><div class="section-kicker">Oylik tushum</div><div class="metric-value fs-5">{{ '{:,.0f}'.format(monthly_income or 0) }}</div><div class="small text-secondary">so'm</div></div><span class="metric-icon"><i class="bi bi-cash-stack" aria-hidden="true"></i></span></div></section></div>
+    <div class="col-6 col-xl-3"><section class="card section-card h-100"><div class="card-body d-flex justify-content-between gap-2"><div><div class="section-kicker">Kutilayotgan / muddati o'tgan</div><div class="metric-value">{{ pending_count }} <span class="text-danger">/ {{ overdue_count }}</span></div><div class="small text-secondary">Qarz: {{ '{:,.0f}'.format(debt_total or 0) }} so'm</div></div><span class="metric-icon"><i class="bi bi-hourglass-split" aria-hidden="true"></i></span></div></section></div>
+</div>
+<section class="card section-card mb-4"><div class="card-body d-flex justify-content-between align-items-center"><div><p class="section-kicker mb-1">YANGILIKLAR</p><h2 class="section-title mb-0">Bildirishnomalar</h2></div><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('notifications') }}">Barchasi{% if unread_notification_count %} · {{ unread_notification_count }} yangi{% endif %}</a></div><div class="list-group list-group-flush">{% for notification in notifications %}<form method="POST" action="{{ url_for('mark_notification_read',notification_id=notification.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="list-group-item list-group-item-action px-3 py-3 text-start w-100 border-0 {% if not notification.read_at %}bg-success-subtle{% endif %}" type="submit"><div class="d-flex justify-content-between gap-3"><span class="fw-semibold">{{ notification.title }}</span><time class="small text-secondary text-nowrap">{{ notification.created_at.strftime('%d.%m %H:%M') }}</time></div><div class="small text-secondary mt-1">{{ notification.message }}</div></button></form>{% else %}<div class="empty-state">Hozircha bildirishnomalar yo'q.</div>{% endfor %}</div></section>
+<section class="card section-card mb-4"><div class="card-body"><div class="row align-items-center g-4"><div class="col-lg-4"><p class="section-kicker mb-1">MOLIYAVIY HOLAT</p><h2 class="section-title mb-2">To'lovlar taqsimoti</h2><p class="small text-secondary mb-0">To'langan, muddati kelmagan va muddati o'tgan to'lovlar soni.</p><div class="d-flex flex-wrap gap-3 mt-3 small"><span><i class="bi bi-circle-fill me-1" style="color:#176b55" aria-hidden="true"></i>To'langan: {{ paid_count }}</span><span><i class="bi bi-circle-fill me-1" style="color:#e7b84b" aria-hidden="true"></i>Kutilmoqda: {{ pending_count }}</span><span><i class="bi bi-circle-fill me-1" style="color:#d66e50" aria-hidden="true"></i>Muddati o'tgan: {{ overdue_count }}</span></div></div><div class="col-lg-8"><div class="chart-frame"><canvas id="paymentStatusChart" data-chart-values="{{ [paid_count, pending_count, overdue_count]|tojson }}" role="img" aria-label="To'lov holatlari diagrammasi"></canvas></div></div></div></div></section>
+<div class="row g-4">
+    <div class="col-xl-7"><section class="card section-card h-100">
+        <div class="card-body d-flex justify-content-between align-items-center"><h2 class="section-title mb-0">{% if current_user.role == 'student_parent' %}Bog'langan o'quvchilar{% else %}O'quvchilar{% endif %}</h2>{% if current_user.role == 'admin' %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('students') }}">Barchasi</a>{% endif %}</div>
+        <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Ism</th><th>Kurs</th><th>Guruh</th><th>Holati</th></tr></thead><tbody>
+            {% for student in students %}<tr><td class="fw-semibold">{{ student.name }}</td><td>{{ student.course }}</td><td>{{ student.group.name if student.group else '-' }}</td><td><span class="badge text-bg-light">{{ {'active':'Faol','paused':'To\'xtatilgan','completed':'Yakunlangan'}.get(student.status,student.status) }}</span></td></tr>
+            {% else %}<tr><td colspan="4" class="empty-state">Hozircha bog'langan o'quvchilar yo'q.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section></div>
+    <div class="col-xl-5"><section class="card section-card h-100">
+        <div class="card-body d-flex justify-content-between align-items-center"><h2 class="section-title mb-0">Yaqin darslar</h2>{% if current_user.role in ('admin','teacher') %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('sessions') }}">Darslar</a>{% endif %}</div>
+        <div class="list-group list-group-flush">{% for class_session in sessions %}<a class="list-group-item list-group-item-action px-3 py-3" href="{{ url_for('session_attendance', session_id=class_session.id) if current_user.role in ('admin','teacher') else url_for('dashboard') }}"><div class="d-flex justify-content-between gap-2"><div class="fw-semibold">{{ class_session.group.name }}</div><time class="small text-secondary">{{ class_session.starts_at.strftime('%d.%m %H:%M') }}</time></div><div class="small text-secondary">{{ class_session.topic or class_session.group.course_name }}</div></a>{% else %}<div class="empty-state">Rejalashtirilgan dars yo'q.</div>{% endfor %}</div>
+    </section></div>
+    <div class="col-12"><section class="card section-card">
+        <div class="card-body d-flex justify-content-between align-items-center"><h2 class="section-title mb-0">So'nggi to'lovlar</h2><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('payments') }}">To'lovlar</a></div>
+        <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>O'quvchi</th><th>Oy</th><th>Summa</th><th>Holati</th></tr></thead><tbody>
+            {% for payment in payments %}<tr><td class="fw-semibold">{{ payment.student.name }}</td><td>{{ payment.month }}</td><td>{{ '{:,.0f}'.format(payment.amount) }} so'm</td><td>{% if payment.effective_status == 'paid' %}<span class="badge rounded-pill text-bg-success">To'langan</span>{% elif payment.effective_status == 'overdue' %}<span class="badge rounded-pill text-bg-danger">Muddati o'tgan</span>{% else %}<span class="badge rounded-pill text-bg-warning">Kutilmoqda</span>{% endif %}</td></tr>
+            {% else %}<tr><td colspan="4" class="empty-state">To'lovlar yo'q.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+<script>
+    const paymentChart = document.getElementById('paymentStatusChart');
+    if (paymentChart) {
+        new Chart(paymentChart, {
+            type: 'doughnut',
+            data: {
+                labels: ["To'langan", 'Kutilmoqda', "Muddati o'tgan"],
+                datasets: [{
+                    data: JSON.parse(paymentChart.dataset.chartValues),
+                    backgroundColor: ['#176b55', '#e7b84b', '#d66e50'],
+                    borderColor: '#ffffff',
+                    borderWidth: 3,
+                    hoverOffset: 5,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '68%',
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (context) => `${context.label}: ${context.parsed}` } },
+                },
+            },
+        });
+    }
+</script>
+{% endblock %}

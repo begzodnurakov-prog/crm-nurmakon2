@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}O'quvchilar | Crm_nurmakon{% endblock %}
+{% block content %}
+<header class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4"><div><p class="section-kicker mb-1">ADMINISTRATOR</p><h1 class="page-heading mb-0">O'quvchilar</h1></div><span class="small text-secondary">{{ student_page.total }} ta natija</span></header>
+<div class="row g-4">
+    <div class="col-xl-8"><section class="card section-card">
+        <div class="card-body"><form class="d-flex gap-2" method="GET" role="search"><label class="visually-hidden" for="q">Ism yoki telefon bo'yicha qidirish</label><input class="form-control" id="q" name="q" type="search" value="{{ search }}" placeholder="Ism yoki telefon raqami"><button class="btn btn-primary" type="submit" aria-label="Qidirish"><i class="bi bi-search" aria-hidden="true"></i></button>{% if search %}<a class="btn btn-outline-secondary" href="{{ url_for('students') }}" aria-label="Tozalash"><i class="bi bi-x-lg" aria-hidden="true"></i></a>{% endif %}</form></div>
+        <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>O'quvchi</th><th>Kurs / guruh</th><th>Telefon</th><th>Qabul qilingan</th><th>Holat</th><th></th></tr></thead><tbody>
+            {% for student in students %}<tr><td class="fw-semibold">{{ student.name }}</td><td>{{ student.course }}<div class="small text-secondary">{{ student.group.name if student.group else '-' }}</div></td><td class="text-nowrap">{{ student.phone }}</td><td>{{ student.enrollment_date.strftime('%d.%m.%Y') if student.enrollment_date else '-' }}</td><td><span class="badge text-bg-{{ 'success' if student.status == 'active' else 'secondary' }}">{{ {'active':'Faol','paused':"To'xtatilgan",'completed':'Yakunlangan'}.get(student.status,student.status) }}</span></td><td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('edit_student',student_id=student.id) }}" aria-label="Tahrirlash"><i class="bi bi-pencil" aria-hidden="true"></i></a></td></tr>
+            {% else %}<tr><td colspan="6" class="empty-state">{% if search %}Qidiruv bo'yicha o'quvchi topilmadi.{% else %}Hozircha o'quvchilar yo'q.{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div>
+        {% if student_page.pages > 1 %}<nav class="card-body border-top" aria-label="O'quvchilar sahifalari"><ul class="pagination pagination-sm mb-0 justify-content-end">{% if student_page.has_prev %}<li class="page-item"><a class="page-link" href="{{ url_for('students',page=student_page.prev_num,q=search) }}">Oldingi</a></li>{% endif %}{% for page_number in student_page.iter_pages() %}{% if page_number %}<li class="page-item {{ 'active' if page_number == student_page.page else '' }}"><a class="page-link" href="{{ url_for('students',page=page_number,q=search) }}">{{ page_number }}</a></li>{% else %}<li class="page-item disabled"><span class="page-link">...</span></li>{% endif %}{% endfor %}{% if student_page.has_next %}<li class="page-item"><a class="page-link" href="{{ url_for('students',page=student_page.next_num,q=search) }}">Keyingi</a></li>{% endif %}</ul></nav>{% endif %}
+    </section></div>
+    <div class="col-xl-4"><section class="card section-card"><div class="card-body"><h2 class="section-title mb-3">Yangi o'quvchi</h2>
+        <form method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3"><label class="form-label" for="name">To'liq ism</label><input class="form-control" id="name" name="name" maxlength="100" required></div>
+            <div class="mb-3"><label class="form-label" for="phone">Telefon</label><input class="form-control" id="phone" name="phone" type="tel" maxlength="20" required></div>
+            <div class="mb-3"><label class="form-label" for="course">Kurs</label><input class="form-control" id="course" name="course" maxlength="100" required></div>
+            <div class="mb-3"><label class="form-label" for="group_id">Guruh</label><select class="form-select" id="group_id" name="group_id" required><option value="">Tanlang</option>{% for group in groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}</select></div>
+            <div class="mb-3"><label class="form-label" for="enrollment_date">Qabul qilingan sana</label><input class="form-control" id="enrollment_date" name="enrollment_date" type="date" value="{{ today_date }}" required></div>
+            <div class="mb-3"><label class="form-label" for="status">Holat</label><select class="form-select" id="status" name="status"><option value="active">Faol</option><option value="paused">To'xtatilgan</option><option value="completed">Yakunlangan</option></select></div>
+            {% if parents %}<fieldset class="mb-3"><legend class="form-label">Bog'langan ota-ona hisoblari</legend>{% for parent in parents %}<div class="form-check"><input class="form-check-input" type="checkbox" name="parent_ids" value="{{ parent.id }}" id="parent_{{ parent.id }}"><label class="form-check-label" for="parent_{{ parent.id }}">{{ parent.full_name }} <span class="text-secondary">({{ parent.email }})</span></label></div>{% endfor %}</fieldset>{% endif %}
+            <button class="btn btn-primary w-100" type="submit"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>O'quvchini qo'shish</button>
+        </form>
+    </div></section></div>
+</div>
+{% endblock %}
