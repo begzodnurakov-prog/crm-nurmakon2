@@ -40,9 +40,12 @@ def _add_legacy_columns():
         'group_id': 'INTEGER REFERENCES learning_group(id) ON DELETE SET NULL',
     }
     payment_additions = {
-        'payment_type': "VARCHAR(10) NOT NULL DEFAULT 'cash'",
-        'payment_date': 'DATE',
+        'payment_type': "VARCHAR(20) NOT NULL DEFAULT 'cash'",
+        'payment_date': 'DATETIME',
         'receipt_number': 'VARCHAR(40)',
+        'recorded_by_id': 'INTEGER REFERENCES user_account(id) ON DELETE SET NULL',
+        'notes': "TEXT NOT NULL DEFAULT ''",
+        'is_credit': 'BOOLEAN NOT NULL DEFAULT FALSE',
         'due_date': 'DATE',
         'paid_at': 'DATETIME',
         'created_at': 'DATETIME',
@@ -67,7 +70,7 @@ def _add_legacy_columns():
         connection.execute(text('UPDATE student SET enrollment_date = CURRENT_DATE WHERE enrollment_date IS NULL'))
         connection.execute(text("UPDATE student SET status = 'active' WHERE status IS NULL OR status = ''"))
         connection.execute(text('UPDATE payment SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL'))
-        connection.execute(text('UPDATE payment SET payment_date = DATE(paid_at) WHERE payment_date IS NULL AND paid_at IS NOT NULL'))
+        connection.execute(text('UPDATE payment SET payment_date = DATETIME(paid_at) WHERE payment_date IS NULL AND paid_at IS NOT NULL'))
 
 
 def _create_search_indexes():
@@ -81,6 +84,7 @@ def _create_search_indexes():
         'CREATE INDEX IF NOT EXISTS ix_payment_due_date ON payment (due_date)',
         'CREATE INDEX IF NOT EXISTS ix_payment_payment_date ON payment (payment_date)',
         'CREATE INDEX IF NOT EXISTS ix_payment_student_id ON payment (student_id)',
+        'CREATE INDEX IF NOT EXISTS ix_payment_recorded_by_id ON payment (recorded_by_id)',
         'CREATE INDEX IF NOT EXISTS ix_student_payment_status ON student (payment_status)',
         'CREATE UNIQUE INDEX IF NOT EXISTS ix_payment_receipt_number ON payment (receipt_number)',
     )
@@ -138,10 +142,14 @@ def _migrate_legacy_payments():
                 payment.due_date = None
     for student in Student.query.all():
         pending = Payment.query.filter_by(student_id=student.id, status='pending').all()
-        student.balance = sum((payment.amount for payment in pending), start=0)
+        credits = Payment.query.filter_by(student_id=student.id, status='paid', is_credit=True).all()
+        student.balance = (
+            sum((payment.amount for payment in credits), start=0)
+            - sum((payment.amount for payment in pending), start=0)
+        )
         student.payment_status = (
             'overdue' if any(payment.due_date and payment.due_date < date.today() for payment in pending)
-            else 'pending' if pending else 'paid'
+            else 'pending' if pending and student.balance < 0 else 'paid'
         )
 
 

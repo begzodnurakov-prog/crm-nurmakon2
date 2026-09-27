@@ -1,5 +1,5 @@
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from urllib.parse import urljoin, urlparse
@@ -11,7 +11,7 @@ from flask_limiter.errors import RateLimitExceeded
 from flask_login import current_user, login_required, login_user, logout_user
 from flask_wtf.csrf import CSRFError
 from sqlalchemy import func, or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from werkzeug.exceptions import HTTPException
 
 from config import Config
@@ -250,12 +250,18 @@ def _course_form_values(form):
 
 def _sync_student_payment_state(student):
     pending_payments = Payment.query.filter_by(student_id=student.id, status='pending')
-    student.balance = pending_payments.with_entities(
+    pending_total = pending_payments.with_entities(
         func.coalesce(func.sum(Payment.amount), 0)
     ).scalar()
+    credit_total = Payment.query.filter_by(
+        student_id=student.id, status='paid', is_credit=True,
+    ).with_entities(func.coalesce(func.sum(Payment.amount), 0)).scalar()
+    student.balance = credit_total - pending_total
     has_overdue = pending_payments.filter(Payment.due_date < date.today()).first() is not None
     has_pending = pending_payments.first() is not None
-    student.payment_status = 'overdue' if has_overdue else 'pending' if has_pending else 'paid'
+    student.payment_status = (
+        'overdue' if has_overdue else 'pending' if has_pending and student.balance < 0 else 'paid'
+    )
 
 
 def _linked_parent_ids(form):
@@ -966,24 +972,34 @@ def register_routes(app):
         )
 
     @app.route('/payments', methods=['GET', 'POST'])
+    @app.post('/payments/create', endpoint='create_payment')
     @login_required
     def payments():
         if request.method == 'POST':
             if current_user.role != 'admin':
                 abort(403)
             try:
-                student = db.get_or_404(Student, int(request.form.get('student_id', '')))
-                amount = Decimal(request.form.get('amount', ''))
+                student_id = int(request.form.get('student_id', ''))
+                student = db.session.get(Student, student_id)
+                amount = Decimal(request.form.get('amount', '').strip())
                 month = request.form.get('month_covered', request.form.get('month', ''))
-                due_date = _parse_date(request.form.get('due_date', ''))
-                status = request.form.get('status', '')
-                payment_type = request.form.get('payment_type', 'cash')
-                payment_date = _parse_date(request.form['payment_date']) if request.form.get('payment_date') else date.today()
+                due_date_value = request.form.get('due_date', '').strip()
+                due_date = _parse_date(due_date_value) if due_date_value else None
+                status = request.form.get('status', 'paid')
+                payment_type = request.form.get('payment_type', 'cash').strip()
+                payment_date_value = request.form.get('payment_date', '').strip()
+                payment_date = datetime.combine(
+                    _parse_date(payment_date_value), datetime.min.time(), timezone.utc,
+                ) if payment_date_value else datetime.now(timezone.utc)
                 receipt_number = request.form.get('receipt_number', '').strip() or None
+                notes = request.form.get('notes', '').strip()
                 datetime.strptime(month, '%Y-%m')
                 if (
-                    not amount.is_finite() or amount <= 0 or status not in ('paid', 'pending')
-                    or payment_type not in ('cash', 'card') or len(receipt_number or '') > 40
+                    student is None or not amount.is_finite() or amount <= 0
+                    or status not in ('paid', 'pending')
+                    or payment_type not in ('cash', 'card', 'bank_transfer')
+                    or (status == 'pending' and due_date is None)
+                    or len(receipt_number or '') > 40 or len(notes) > 2000
                 ):
                     raise ValueError
                 if receipt_number and Payment.query.filter_by(receipt_number=receipt_number).first():
@@ -993,11 +1009,15 @@ def register_routes(app):
                     payment_type=payment_type,
                     payment_date=payment_date if status == 'paid' else None,
                     receipt_number=receipt_number,
-                    status=status, paid_at=datetime.now() if status == 'paid' else None,
+                    status=status,
+                    paid_at=datetime.now(timezone.utc) if status == 'paid' else None,
+                    recorded_by=current_user,
+                    notes=notes,
+                    is_credit=status == 'paid',
                 )
                 db.session.add(payment)
                 db.session.flush()
-                if status == 'paid' and payment.receipt_number is None:
+                if payment.receipt_number is None:
                     payment.receipt_number = f'PAY-{date.today():%Y%m%d}-{payment.id:06d}'
                 _sync_student_payment_state(student)
                 db.session.commit()
@@ -1006,29 +1026,48 @@ def register_routes(app):
             except (ValueError, InvalidOperation, KeyError, TypeError):
                 db.session.rollback()
                 flash("To'lov ma'lumotlarini tekshiring.", 'error')
+                return redirect(url_for('payments'))
+            except SQLAlchemyError:
+                db.session.rollback()
+                flash("To'lovni saqlashda xatolik yuz berdi. Qayta urinib ko'ring.", 'error')
+                return redirect(url_for('payments'))
 
-        base_query = Payment.query.join(Student)
+        scoped_query = Payment.query.join(Student)
         if current_user.role == 'teacher':
-            base_query = base_query.filter(Student.groups.any(Group.teacher_id == current_user.id))
+            scoped_query = scoped_query.filter(Student.groups.any(Group.teacher_id == current_user.id))
         elif current_user.role == 'student_parent':
-            base_query = base_query.join(Student.parents).filter(User.id == current_user.id)
+            scoped_query = scoped_query.join(Student.parents).filter(User.id == current_user.id)
+        base_query = scoped_query
         start_date = request.args.get('from_date', '').strip()
         end_date = request.args.get('to_date', '').strip()
         student_filter = request.args.get('student_id', '').strip()
+        student_name_filter = request.args.get('student_name', '').strip()[:100]
+        payment_type_filter = request.args.get('payment_type', '').strip()
         try:
             start_day = _parse_date(start_date) if start_date else None
             end_day = _parse_date(end_date) if end_date else None
             if start_day and end_day and start_day > end_day:
                 raise ValueError
             if start_day:
-                base_query = base_query.filter(Payment.payment_date >= start_day)
+                base_query = base_query.filter(Payment.payment_date >= datetime.combine(
+                    start_day, datetime.min.time(), timezone.utc,
+                ))
             if end_day:
-                base_query = base_query.filter(Payment.payment_date <= end_day)
+                base_query = base_query.filter(Payment.payment_date < datetime.combine(
+                    end_day + timedelta(days=1), datetime.min.time(), timezone.utc,
+                ))
             if student_filter:
                 base_query = base_query.filter(Payment.student_id == int(student_filter))
+            if student_name_filter:
+                base_query = base_query.filter(Student.name.ilike(f'%{student_name_filter}%'))
         except (ValueError, TypeError):
             flash("Sana yoki o'quvchi filtri noto'g'ri.", 'error')
             return redirect(url_for('payments'))
+        if payment_type_filter:
+            if payment_type_filter not in ('cash', 'card', 'bank_transfer'):
+                flash("To'lov usuli filtri noto'g'ri.", 'error')
+                return redirect(url_for('payments'))
+            base_query = base_query.filter(Payment.payment_type == payment_type_filter)
         revenue = base_query.filter(Payment.status == 'paid').with_entities(
             func.coalesce(func.sum(Payment.amount), 0)
         ).scalar()
@@ -1038,39 +1077,67 @@ def register_routes(app):
             query = query.filter(Payment.status == 'pending', Payment.due_date < date.today())
         elif status_filter in ('paid', 'pending'):
             query = query.filter(Payment.status == status_filter)
+
+        today = date.today()
+        month_start = datetime.combine(today.replace(day=1), datetime.min.time(), timezone.utc)
+        tomorrow = datetime.combine(today + timedelta(days=1), datetime.min.time(), timezone.utc)
+        monthly_revenue = scoped_query.filter(
+            Payment.status == 'paid', Payment.payment_date >= month_start,
+            Payment.payment_date < tomorrow,
+        ).with_entities(func.coalesce(func.sum(Payment.amount), 0)).scalar() or 0
+        debt_total = _student_scope_query(current_user).filter(Student.balance < 0).with_entities(
+            func.coalesce(func.sum(-Student.balance), 0),
+        ).scalar() or 0
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        recent_transactions_count = scoped_query.filter(
+            Payment.status == 'paid', Payment.payment_date >= recent_cutoff,
+        ).count()
         payment_page = db.paginate(
-            query.order_by(Payment.payment_date.desc(), Payment.month.desc(), Payment.id.desc()).statement,
+            query.order_by(
+                func.coalesce(Payment.payment_date, Payment.created_at).desc(),
+                Payment.month.desc(), Payment.id.desc(),
+            ).statement,
             per_page=50, max_per_page=100, error_out=False,
         )
         students_for_payment = Student.query.order_by(Student.name).all() if current_user.role == 'admin' else []
         filter_students = _student_scope_query(current_user).order_by(Student.name).all()
+        record_for = request.args.get('record_for', '').strip()
         return render_template(
             'payments.html', payments=payment_page.items, payment_page=payment_page,
             students=students_for_payment, filter_students=filter_students,
             status_filter=status_filter, revenue=revenue,
+            monthly_revenue=monthly_revenue, debt_total=debt_total,
+            recent_transactions_count=recent_transactions_count,
             from_date=start_date, to_date=end_date, student_filter=student_filter,
+            student_name_filter=student_name_filter, payment_type_filter=payment_type_filter,
+            record_for=record_for,
             today_iso=date.today().isoformat(),
         )
 
     @app.get('/payments/debtors')
     @roles_required('admin')
     def payment_debtors():
-        overdue_students = Student.query.join(Payment).filter(
-            Payment.status == 'pending', Payment.due_date < date.today(),
-        ).distinct().order_by(Student.name).all()
-        for student in overdue_students:
+        pending_students = Student.query.join(Payment).filter(Payment.status == 'pending').distinct().all()
+        for student in pending_students:
             _sync_student_payment_state(student)
-        if overdue_students:
+        if pending_students:
             db.session.commit()
-        return render_template('debtors.html', students=overdue_students)
+        overdue_student_ids = Payment.query.filter(
+            Payment.status == 'pending', Payment.due_date < date.today(),
+        ).with_entities(Payment.student_id)
+        debtor_students = Student.query.filter(or_(
+            Student.balance < 0, Student.id.in_(overdue_student_ids),
+        )).order_by(Student.name).all()
+        return render_template('debtors.html', students=debtor_students)
 
     @app.post('/payments/<int:payment_id>/mark-paid')
     @roles_required('admin')
     def mark_payment_paid(payment_id):
         payment = db.get_or_404(Payment, payment_id)
         payment.status = 'paid'
+        payment.is_credit = False
         payment.paid_at = datetime.now()
-        payment.payment_date = date.today()
+        payment.payment_date = datetime.now(timezone.utc)
         if payment.receipt_number is None:
             payment.receipt_number = f'PAY-{date.today():%Y%m%d}-{payment.id:06d}'
         _sync_student_payment_state(payment.student)

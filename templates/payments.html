@@ -6,30 +6,51 @@
         <p class="section-kicker mb-1">MOLIYA</p>
         <h1 class="page-heading mb-0">To'lovlar tarixi</h1>
     </div>
+    {% if current_user.role == 'admin' %}
     <div class="d-flex flex-wrap gap-2">
-        {% if current_user.role == 'admin' %}
-        <a class="btn btn-outline-danger" href="{{ url_for('payment_debtors') }}">Qarzdorlar</a>
-        <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal">To'lov qo'shish</button>
-        {% endif %}
+        <a class="btn btn-outline-danger" href="{{ url_for('payment_debtors') }}"><i class="bi bi-exclamation-circle me-1" aria-hidden="true"></i>Qarzdorlar</a>
+        <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>To'lov yozish</button>
     </div>
+    {% endif %}
 </header>
 
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <section class="card section-card h-100"><div class="card-body d-flex justify-content-between gap-3">
+            <div><p class="section-kicker mb-1">Shu oydagi tushum</p><p class="metric-value mb-0">{{ '{:,.0f}'.format(monthly_revenue) }}</p><span class="small text-secondary">so'm</span></div>
+            <span class="metric-icon"><i class="bi bi-cash-stack" aria-hidden="true"></i></span>
+        </div></section>
+    </div>
+    <div class="col-md-4">
+        <section class="card section-card h-100"><div class="card-body d-flex justify-content-between gap-3">
+            <div><p class="section-kicker mb-1">Kutilayotgan / muddati o'tgan qarz</p><p class="metric-value mb-0">{{ '{:,.0f}'.format(debt_total) }}</p><span class="small text-secondary">so'm</span></div>
+            <span class="metric-icon"><i class="bi bi-hourglass-split" aria-hidden="true"></i></span>
+        </div></section>
+    </div>
+    <div class="col-md-4">
+        <section class="card section-card h-100"><div class="card-body d-flex justify-content-between gap-3">
+            <div><p class="section-kicker mb-1">So'nggi 30 kundagi tranzaksiyalar</p><p class="metric-value mb-0">{{ recent_transactions_count }}</p><span class="small text-secondary">ta to'lov</span></div>
+            <span class="metric-icon"><i class="bi bi-receipt" aria-hidden="true"></i></span>
+        </div></section>
+    </div>
+</div>
+
 <section class="card section-card mb-4">
-    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
-        <div>
-            <p class="text-secondary mb-1">Tanlangan filtrlar bo'yicha tushum</p>
-            <p class="h3 mb-0">{{ '{:,.0f}'.format(revenue) }} so'm</p>
-        </div>
-        <form class="row g-2 align-items-end" method="GET">
-            <div class="col-auto">
+    <div class="card-body">
+        <form class="row g-2 align-items-end" method="GET" role="search">
+            <div class="col-6 col-lg-auto">
                 <label class="form-label mb-1" for="from_date">Sanadan</label>
                 <input class="form-control" id="from_date" name="from_date" type="date" value="{{ from_date }}">
             </div>
-            <div class="col-auto">
+            <div class="col-6 col-lg-auto">
                 <label class="form-label mb-1" for="to_date">Sanagacha</label>
                 <input class="form-control" id="to_date" name="to_date" type="date" value="{{ to_date }}">
             </div>
-            <div class="col-auto">
+            <div class="col-md-6 col-lg-2">
+                <label class="form-label mb-1" for="student_name">O'quvchi ismi</label>
+                <input class="form-control" id="student_name" name="student_name" type="search" maxlength="100" value="{{ student_name_filter }}" placeholder="Ism bo'yicha qidirish">
+            </div>
+            <div class="col-md-6 col-lg-2">
                 <label class="form-label mb-1" for="student_filter">O'quvchi</label>
                 <select class="form-select" id="student_filter" name="student_id">
                     <option value="">Barcha o'quvchilar</option>
@@ -38,7 +59,16 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-auto">
+            <div class="col-md-4 col-lg-2">
+                <label class="form-label mb-1" for="payment_type_filter">To'lov usuli</label>
+                <select class="form-select" id="payment_type_filter" name="payment_type">
+                    <option value="">Barcha usullar</option>
+                    <option value="cash" {% if payment_type_filter == 'cash' %}selected{% endif %}>Naqd</option>
+                    <option value="card" {% if payment_type_filter == 'card' %}selected{% endif %}>Karta</option>
+                    <option value="bank_transfer" {% if payment_type_filter == 'bank_transfer' %}selected{% endif %}>Bank o'tkazmasi</option>
+                </select>
+            </div>
+            <div class="col-md-4 col-lg-2">
                 <label class="form-label mb-1" for="status">Holati</label>
                 <select class="form-select" name="status" id="status">
                     <option value="">Barcha holatlar</option>
@@ -47,7 +77,7 @@
                     <option value="overdue" {% if status_filter == 'overdue' %}selected{% endif %}>Muddati o'tgan</option>
                 </select>
             </div>
-            <div class="col-auto"><button class="btn btn-outline-secondary" type="submit">Filtrlash</button></div>
+            <div class="col-md-4 col-lg-auto"><button class="btn btn-outline-secondary w-100" type="submit"><i class="bi bi-funnel me-1" aria-hidden="true"></i>Filtrlash</button></div>
         </form>
     </div>
 </section>
@@ -56,10 +86,10 @@
 <div class="modal fade" id="paymentModal" tabindex="-1" aria-labelledby="paymentModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
-            <form method="POST">
+            <form method="POST" action="{{ url_for('create_payment') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="modal-header">
-                    <h2 class="modal-title fs-5" id="paymentModalLabel">To'lov yozuvini qo'shish</h2>
+                    <h2 class="modal-title fs-5" id="paymentModalLabel">To'lov yozish</h2>
                     <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Yopish"></button>
                 </div>
                 <div class="modal-body">
@@ -68,48 +98,56 @@
                             <label class="form-label" for="student_id">O'quvchi</label>
                             <select class="form-select" id="student_id" name="student_id" required>
                                 <option value="">Tanlang</option>
-                                {% for student in students %}<option value="{{ student.id }}">{{ student.name }} · {{ student.group.name if student.group else student.course }}</option>{% endfor %}
+                                {% for student in students %}
+                                <option value="{{ student.id }}" {% if record_for == student.id|string %}selected{% endif %}>{{ student.name }} · {{ student.group.name if student.group else student.course }}</option>
+                                {% endfor %}
                             </select>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label" for="amount">Summa</label>
-                            <input class="form-control" id="amount" name="amount" type="number" min="0.01" step="0.01" required>
+                            <input class="form-control" id="amount" name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="payment_type">To'lov usuli</label>
+                            <select class="form-select" id="payment_type" name="payment_type" required>
+                                <option value="cash">Naqd</option>
+                                <option value="card">Karta</option>
+                                <option value="bank_transfer">Bank o'tkazmasi</option>
+                            </select>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label" for="month_covered">Qamrab olingan oy</label>
                             <input class="form-control" id="month_covered" name="month_covered" type="month" value="{{ today_iso[:7] }}" required>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label" for="due_date">To'lov muddati</label>
-                            <input class="form-control" id="due_date" name="due_date" type="date" value="{{ today_iso }}" required>
-                        </div>
                         <div class="col-md-4">
-                            <label class="form-label" for="payment_type">To'lov turi</label>
-                            <select class="form-select" id="payment_type" name="payment_type" required>
-                                <option value="cash">Naqd</option>
-                                <option value="card">Karta</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label" for="payment_date">To'lov sanasi</label>
-                            <input class="form-control" id="payment_date" name="payment_date" type="date" value="{{ today_iso }}">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label" for="receipt_number">Chek raqami</label>
-                            <input class="form-control" id="receipt_number" name="receipt_number" maxlength="40">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label" for="new_status">Holati</label>
-                            <select class="form-select" id="new_status" name="status" required>
+                            <label class="form-label" for="payment_status">Holati</label>
+                            <select class="form-select" id="payment_status" name="status" required>
                                 <option value="paid">To'langan</option>
                                 <option value="pending">Kutilmoqda</option>
                             </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="due_date">To'lov muddati</label>
+                            <input class="form-control" id="due_date" name="due_date" type="date">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="payment_date">Qabul qilingan sana</label>
+                            <input class="form-control" id="payment_date" name="payment_date" type="date" value="{{ today_iso }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="receipt_number">Chek / tranzaksiya raqami</label>
+                            <input class="form-control" id="receipt_number" name="receipt_number" maxlength="40" autocomplete="off">
+                            <div class="form-text">Bo'sh qoldirilsa avtomatik yaratiladi.</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="notes">Izoh</label>
+                            <textarea class="form-control" id="notes" name="notes" rows="2" maxlength="2000"></textarea>
                         </div>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button class="btn btn-primary" type="submit">Saqlash</button>
+                    <button class="btn btn-primary" type="submit"><i class="bi bi-check2-circle me-1" aria-hidden="true"></i>To'lovni saqlash</button>
                 </div>
             </form>
         </div>
@@ -120,16 +158,17 @@
 <section class="card section-card">
     <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">
-            <thead><tr><th>O'quvchi</th><th>Oy</th><th>Summa</th><th>Usul</th><th>To'lov sanasi</th><th>Chek</th><th>Holati</th></tr></thead>
+            <thead><tr><th>O'quvchi</th><th>Oy</th><th>Summa</th><th>Usul</th><th>To'lov sanasi</th><th>Chek</th><th>Qabul qildi</th><th>Holati</th></tr></thead>
             <tbody>
             {% for payment in payments %}
             <tr>
-                <td class="fw-semibold">{{ payment.student.name }}</td>
+                <td class="fw-semibold">{{ payment.student.name }}{% if payment.notes %}<div class="small fw-normal text-secondary">{{ payment.notes }}</div>{% endif %}</td>
                 <td>{{ payment.month_covered }}</td>
                 <td class="text-nowrap">{{ '{:,.0f}'.format(payment.amount) }} so'm</td>
-                <td>{{ 'Karta' if payment.payment_type == 'card' else 'Naqd' }}</td>
-                <td>{{ payment.payment_date.strftime('%d.%m.%Y') if payment.payment_date else '-' }}</td>
+                <td>{% if payment.payment_type == 'card' %}Karta{% elif payment.payment_type == 'bank_transfer' %}Bank o'tkazmasi{% else %}Naqd{% endif %}</td>
+                <td class="text-nowrap">{{ payment.payment_date.strftime('%d.%m.%Y %H:%M') if payment.payment_date else '-' }}</td>
                 <td>{{ payment.receipt_number or '-' }}</td>
+                <td>{{ payment.recorded_by.full_name if payment.recorded_by else '-' }}</td>
                 <td>
                     <div class="d-flex flex-wrap align-items-center gap-2">
                         {% if payment.effective_status == 'paid' %}<span class="badge text-bg-success">To'langan</span>
@@ -144,21 +183,40 @@
                     </div>
                 </td>
             </tr>
-            {% else %}<tr><td colspan="7" class="empty-state">To'lovlar topilmadi.</td></tr>{% endfor %}
+            {% else %}<tr><td colspan="8" class="empty-state">To'lovlar topilmadi.</td></tr>{% endfor %}
             </tbody>
         </table>
     </div>
     {% if payment_page.pages > 1 %}
     <nav class="card-body border-top" aria-label="To'lovlar sahifalari">
         <ul class="pagination pagination-sm mb-0 justify-content-end">
-            {% if payment_page.has_prev %}<li class="page-item"><a class="page-link" href="{{ url_for('payments', page=payment_page.prev_num, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter) }}">Oldingi</a></li>{% endif %}
+            {% if payment_page.has_prev %}<li class="page-item"><a class="page-link" href="{{ url_for('payments', page=payment_page.prev_num, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter, student_name=student_name_filter, payment_type=payment_type_filter) }}">Oldingi</a></li>{% endif %}
             {% for page_number in payment_page.iter_pages() %}
-                {% if page_number %}<li class="page-item {{ 'active' if page_number == payment_page.page else '' }}"><a class="page-link" href="{{ url_for('payments', page=page_number, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter) }}">{{ page_number }}</a></li>
+                {% if page_number %}<li class="page-item {{ 'active' if page_number == payment_page.page else '' }}"><a class="page-link" href="{{ url_for('payments', page=page_number, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter, student_name=student_name_filter, payment_type=payment_type_filter) }}">{{ page_number }}</a></li>
                 {% else %}<li class="page-item disabled"><span class="page-link">...</span></li>{% endif %}
             {% endfor %}
-            {% if payment_page.has_next %}<li class="page-item"><a class="page-link" href="{{ url_for('payments', page=payment_page.next_num, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter) }}">Keyingi</a></li>{% endif %}
+            {% if payment_page.has_next %}<li class="page-item"><a class="page-link" href="{{ url_for('payments', page=payment_page.next_num, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter, student_name=student_name_filter, payment_type=payment_type_filter) }}">Keyingi</a></li>{% endif %}
         </ul>
     </nav>
     {% endif %}
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+    const paymentStatus = document.getElementById('payment_status');
+    const dueDate = document.getElementById('due_date');
+    const paymentDate = document.getElementById('payment_date');
+    const updatePaymentDateRequirements = () => {
+        const pending = paymentStatus?.value === 'pending';
+        if (dueDate) dueDate.required = pending;
+        if (paymentDate) paymentDate.required = !pending;
+    };
+    paymentStatus?.addEventListener('change', updatePaymentDateRequirements);
+    updatePaymentDateRequirements();
+
+    {% if record_for %}
+    const paymentModal = document.getElementById('paymentModal');
+    if (paymentModal && window.bootstrap) bootstrap.Modal.getOrCreateInstance(paymentModal).show();
+    {% endif %}
+</script>
 {% endblock %}

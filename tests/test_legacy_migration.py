@@ -1,7 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from app import create_app
@@ -107,7 +107,15 @@ class LegacyMigrationTests(unittest.TestCase):
                         ))
                         connection.execute(db.text(
                             "INSERT INTO student (id, name, course, phone, enrollment_date, status, balance, payment_status, group_id) "
-                            "VALUES (3, 'Learner', 'Algebra', '+998901234567', CURRENT_DATE, 'active', 0, 'paid', 2)"
+                            "VALUES (3, 'Learner', 'Algebra', '+998901234567', CURRENT_DATE, 'active', 250000, 'pending', 2)"
+                        ))
+                        connection.execute(db.text(
+                            "INSERT INTO payment (id, student_id, amount, month, status, due_date, created_at, payment_type) "
+                            "VALUES (6, 3, 250000, '2026-09', 'pending', '2026-10-05', CURRENT_TIMESTAMP, 'cash')"
+                        ))
+                        connection.execute(db.text(
+                            "INSERT INTO payment (id, student_id, amount, month, status, paid_at, created_at, payment_type, payment_date) "
+                            "VALUES (7, 3, 90000, '2026-09', 'paid', '2026-09-26 12:00:00', CURRENT_TIMESTAMP, 'cash', '2026-09-26')"
                         ))
                         connection.execute(db.text(
                             "INSERT INTO class_session (id, group_id, starts_at, topic, created_by_id) "
@@ -119,9 +127,14 @@ class LegacyMigrationTests(unittest.TestCase):
                         ))
                     upgrade(directory='migrations')
                     student = db.session.get(Student, 3)
+                    migrated_payment = db.session.get(Payment, 7)
                     course = Course.query.filter_by(title='Algebra').one()
                     existing_attendance = db.session.get(Attendance, 5)
                     self.assertEqual(student.group_id, 2)
+                    self.assertEqual(student.balance, -250000)
+                    self.assertIsInstance(migrated_payment.payment_date, datetime)
+                    self.assertEqual(migrated_payment.payment_date.date(), date(2026, 9, 26))
+                    self.assertFalse(migrated_payment.is_credit)
                     self.assertEqual([group.id for group in student.groups], [2])
                     self.assertEqual(student.groups[0].course_id, course.id)
                     self.assertEqual(existing_attendance.group_id, 2)

@@ -387,11 +387,15 @@ class CRMWorkflowTests(unittest.TestCase):
             payment = Payment.query.filter_by(student_id=self.student_id).one()
             payment_id = payment.id
             student = db.session.get(Student, self.student_id)
-            self.assertEqual(student.balance, 325000)
+            self.assertEqual(student.balance, -325000)
+            self.assertEqual(student.current_balance, -325000)
             self.assertEqual(student.payment_status, 'overdue')
+            self.assertEqual(student.current_payment_status, 'overdue')
         debtors = self.client.get('/payments/debtors')
         self.assertEqual(debtors.status_code, 200)
         self.assertIn(b'Test Student', debtors.data)
+        self.assertIn(b'+998901234567', debtors.data)
+        self.assertIn(f'record_for={self.student_id}'.encode(), debtors.data)
         response = self.client.post(f'/payments/{payment_id}/mark-paid')
         self.assertEqual(response.status_code, 302)
         with self.app.app_context():
@@ -409,29 +413,48 @@ class CRMWorkflowTests(unittest.TestCase):
 
     def test_payment_collection_metadata_filters_and_revenue(self):
         self._login('admin@example.test')
-        response = self.client.post('/payments', data={
+        response = self.client.post('/payments/create', data={
             'student_id': str(self.student_id),
             'amount': '225000',
             'month_covered': date.today().strftime('%Y-%m'),
-            'due_date': date.today().isoformat(),
-            'payment_type': 'card',
+            'payment_type': 'bank_transfer',
             'payment_date': date.today().isoformat(),
-            'receipt_number': 'RCPT-TEST-1',
             'status': 'paid',
+            'notes': 'Bank transfer reference 93A',
         })
         self.assertEqual(response.status_code, 302)
         response = self.client.get(
-            f'/payments?from_date={date.today().isoformat()}&to_date={date.today().isoformat()}&student_id={self.student_id}'
+            f'/payments?from_date={date.today().isoformat()}&to_date={date.today().isoformat()}'
+            f'&student_id={self.student_id}&student_name=Test&payment_type=bank_transfer'
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'225,000', response.data)
-        self.assertIn(b'RCPT-TEST-1', response.data)
-        self.assertIn(b'Karta', response.data)
+        self.assertIn(b'Bank transfer reference 93A', response.data)
+        self.assertIn("Bank o'tkazmasi".encode(), response.data)
+        self.assertIn(b'Shu oydagi tushum', response.data)
+        self.assertIn(b'So\'nggi 30 kundagi tranzaksiyalar', response.data)
         with self.app.app_context():
-            payment = Payment.query.filter_by(receipt_number='RCPT-TEST-1').one()
+            payment = Payment.query.filter_by(student_id=self.student_id).one()
             self.assertEqual(payment.month_covered, date.today().strftime('%Y-%m'))
-            self.assertEqual(payment.payment_type, 'card')
-            self.assertEqual(payment.student.balance, 0)
+            self.assertEqual(payment.payment_type, 'bank_transfer')
+            self.assertEqual(payment.recorded_by_id, self.admin_id)
+            self.assertEqual(payment.notes, 'Bank transfer reference 93A')
+            self.assertTrue(payment.is_credit)
+            self.assertEqual(payment.receipt_number, f'PAY-{date.today():%Y%m%d}-{payment.id:06d}')
+            self.assertEqual(payment.student.balance, 225000)
+            self.assertEqual(payment.student.current_balance, 225000)
+            self.assertEqual(payment.student.current_payment_status, 'paid')
+
+        invalid_payment = self.client.post('/payments/create', data={
+            'student_id': str(self.student_id),
+            'amount': '-1',
+            'month_covered': date.today().strftime('%Y-%m'),
+            'payment_type': 'cash',
+            'status': 'paid',
+        }, follow_redirects=True)
+        self.assertIn(b'To&#39;lov ma&#39;lumotlarini tekshiring.', invalid_payment.data)
+        with self.app.app_context():
+            self.assertEqual(Payment.query.filter_by(student_id=self.student_id).count(), 1)
 
     def test_admin_group_student_crud_archives_without_erasing_history(self):
         self._login('admin@example.test')

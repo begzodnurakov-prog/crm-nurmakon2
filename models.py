@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from flask_login import UserMixin
 from sqlalchemy import CheckConstraint
@@ -38,6 +39,7 @@ class User(UserMixin, db.Model):
     students = db.relationship('Student', secondary=parent_students, back_populates='parents')
     notifications = db.relationship('Notification', back_populates='user', cascade='all, delete-orphan')
     inquiries = db.relationship('Inquiry', back_populates='sender')
+    recorded_payments = db.relationship('Payment', back_populates='recorded_by')
 
     @property
     def is_active(self):
@@ -71,6 +73,29 @@ class Student(db.Model):
     parents = db.relationship('User', secondary=parent_students, back_populates='students')
     payments = db.relationship('Payment', back_populates='student', cascade='all, delete-orphan')
     attendance_records = db.relationship('Attendance', back_populates='student', cascade='all, delete-orphan')
+
+    @property
+    def current_balance(self):
+        pending_debt = sum(
+            (payment.amount for payment in self.payments if payment.status == 'pending'),
+            start=Decimal('0.00'),
+        )
+        credits = sum(
+            (payment.amount for payment in self.payments if payment.status == 'paid' and payment.is_credit),
+            start=Decimal('0.00'),
+        )
+        return credits - pending_debt
+
+    @property
+    def current_payment_status(self):
+        pending_statuses = [
+            payment.effective_status for payment in self.payments if payment.status == 'pending'
+        ]
+        if 'overdue' in pending_statuses:
+            return 'overdue'
+        if self.current_balance >= 0:
+            return 'paid'
+        return 'pending' if pending_statuses else 'paid'
 
 
 class Course(db.Model):
@@ -153,23 +178,29 @@ class Payment(db.Model):
     __tablename__ = 'payment'
     __table_args__ = (
         CheckConstraint("status IN ('paid', 'pending')", name='ck_payment_status'),
-        CheckConstraint("payment_type IN ('cash', 'card')", name='ck_payment_type'),
+        CheckConstraint("payment_type IN ('cash', 'card', 'bank_transfer')", name='ck_payment_type'),
     )
 
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False, index=True)
     amount = db.Column(db.Numeric(12, 2), nullable=False)
-    payment_type = db.Column(db.String(10), nullable=False, default='cash', server_default='cash')
-    payment_date = db.Column(db.Date, nullable=True, index=True)
+    payment_type = db.Column(db.String(20), nullable=False, default='cash', server_default='cash')
+    payment_date = db.Column(
+        db.DateTime(timezone=True), nullable=True, default=lambda: datetime.now(timezone.utc), index=True,
+    )
     month = db.Column(db.String(7), nullable=False, index=True)
     month_covered = synonym('month')
     receipt_number = db.Column(db.String(40), nullable=True, unique=True, index=True)
+    recorded_by_id = db.Column(db.Integer, db.ForeignKey('user_account.id', ondelete='SET NULL'), nullable=True, index=True)
+    notes = db.Column(db.Text, nullable=False, default='', server_default='')
+    is_credit = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
     status = db.Column(db.String(20), nullable=False, default='pending', index=True)
     due_date = db.Column(db.Date, nullable=True, index=True)
     paid_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=True, default=lambda: datetime.now(timezone.utc))
 
     student = db.relationship('Student', back_populates='payments')
+    recorded_by = db.relationship('User', back_populates='recorded_payments')
 
     @property
     def effective_status(self):
