@@ -52,7 +52,7 @@ python -m flask --app app db upgrade
 python -m flask --app app create-admin
 ```
 
-The first administrator is created through a hidden password prompt. Self-registration only creates parent/student accounts. An administrator provisions teacher and additional admin accounts, assigns teachers to groups, and links parent accounts to students.
+The first administrator is created through a hidden password prompt. Public self-registration is disabled; only an administrator can create accounts from **Foydalanuvchilar**. Admins assign teacher and parent/student roles, provision additional administrator accounts, assign teachers to groups, and link parent accounts to students.
 
 Run tests with:
 

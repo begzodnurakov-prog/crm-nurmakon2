@@ -1,10 +1,104 @@
 {% extends 'base.html' %}
 {% block title %}Foydalanuvchilar | Crm_nurmakon{% endblock %}
 {% block content %}
-<header class="mb-4"><p class="section-kicker mb-1">ADMINISTRATOR</p><h1 class="page-heading mb-0">Foydalanuvchilar</h1></header>
-<div class="row g-4"><div class="col-xl-7"><section class="card section-card"><div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Ism</th><th>Email</th><th>Rol</th><th>Holat</th><th></th></tr></thead><tbody>
-{% for user in users %}<tr><td class="fw-semibold">{{ user.full_name }}</td><td>{{ user.email }}</td><td>{{ {'admin':'Administrator','teacher':"O'qituvchi",'student_parent':"O'quvchi / ota-ona"}.get(user.role,user.role) }}</td><td><span class="badge text-bg-{{ 'success' if user.enabled else 'secondary' }}">{{ 'Faol' if user.enabled else 'O\'chirilgan' }}</span></td><td>{% if user.id != current_user.id %}<form method="POST" action="{{ url_for('toggle_user',user_id=user.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit">{{ 'O\'chirish' if user.enabled else 'Faollashtirish' }}</button></form>{% endif %}</td></tr>
-{% else %}<tr><td colspan="5" class="empty-state">Foydalanuvchilar yo'q.</td></tr>{% endfor %}
-</tbody></table></div></section></div>
-<div class="col-xl-5"><section class="card section-card"><div class="card-body"><h2 class="section-title mb-3">Hisob yaratish</h2><form method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="mb-3"><label class="form-label" for="full_name">To'liq ism</label><input class="form-control" id="full_name" name="full_name" required></div><div class="mb-3"><label class="form-label" for="email">Email</label><input class="form-control" id="email" name="email" type="email" required></div><div class="mb-3"><label class="form-label" for="role">Rol</label><select class="form-select" id="role" name="role"><option value="teacher">O'qituvchi</option><option value="student_parent">O'quvchi / ota-ona</option><option value="admin">Administrator</option></select></div><div class="mb-3"><label class="form-label" for="password">Vaqtinchalik parol</label><input class="form-control" id="password" name="password" type="password" minlength="12" required><div class="form-text">Kamida 12 ta belgi. Parolni foydalanuvchiga xavfsiz tarzda yetkazing.</div></div><button class="btn btn-primary w-100" type="submit">Hisob yaratish</button></form></div></section></div></div>
+<header class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+	<div>
+		<p class="section-kicker mb-1">ADMINISTRATOR</p>
+		<h1 class="page-heading mb-0">Foydalanuvchilar</h1>
+	</div>
+	<button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#createUserModal">
+		<i class="bi bi-person-plus me-1" aria-hidden="true"></i>Yangi foydalanuvchi
+	</button>
+</header>
+
+<section class="card section-card" aria-label="Foydalanuvchilar ro'yxati">
+	<div class="table-responsive">
+		<table class="table table-hover align-middle">
+			<thead>
+				<tr>
+					<th scope="col">Ism</th>
+					<th scope="col">Email</th>
+					<th scope="col">Rol</th>
+					<th scope="col">Holat</th>
+					<th scope="col">Yaratilgan</th>
+					<th scope="col" class="text-end">Amallar</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for user in users %}
+				<tr>
+					<td class="fw-semibold">{{ user.full_name }}</td>
+					<td>{{ user.email }}</td>
+					<td>
+						{% set role_labels = {'admin': 'Administrator', 'teacher': "O'qituvchi", 'student_parent': "O'quvchi / ota-ona"} %}
+						{% set role_colors = {'admin': 'danger', 'teacher': 'primary', 'student_parent': 'secondary'} %}
+						<span class="badge text-bg-{{ role_colors.get(user.role, 'secondary') }}">{{ role_labels.get(user.role, user.role) }}</span>
+					</td>
+					<td><span class="badge text-bg-{{ 'success' if user.enabled else 'secondary' }}">{{ 'Faol' if user.enabled else "O'chirilgan" }}</span></td>
+					<td class="text-nowrap">{{ user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else 'N/A' }}</td>
+					<td class="text-end">
+						{% if user.id != current_user.id %}
+						<form method="POST" action="{{ url_for('toggle_user', user_id=user.id) }}">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+							<button class="btn btn-sm btn-outline-secondary" type="submit" aria-label="{{ 'Hisobni o\'chirish' if user.enabled else 'Hisobni faollashtirish' }}">
+								<i class="bi bi-{{ 'person-slash' if user.enabled else 'person-check' }} me-1" aria-hidden="true"></i>{{ "O'chirish" if user.enabled else 'Faollashtirish' }}
+							</button>
+						</form>
+						{% else %}
+						<span class="small text-secondary">Joriy hisob</span>
+						{% endif %}
+					</td>
+				</tr>
+				{% else %}
+				<tr><td colspan="6" class="empty-state">Foydalanuvchilar yo'q.</td></tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</section>
+
+<div class="modal fade" id="createUserModal" tabindex="-1" aria-labelledby="createUserModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-dialog-centered">
+		<div class="modal-content">
+			<form method="POST" action="{{ url_for('create_user') }}">
+				<div class="modal-header">
+					<h2 class="modal-title fs-5" id="createUserModalLabel">Yangi foydalanuvchi</h2>
+					<button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Yopish"></button>
+				</div>
+				<div class="modal-body">
+					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+					<div class="mb-3">
+						<label class="form-label" for="full_name">To'liq ism</label>
+						<input class="form-control" id="full_name" name="full_name" minlength="2" maxlength="120" autocomplete="name" required>
+					</div>
+					<div class="mb-3">
+						<label class="form-label" for="email">Email</label>
+						<input class="form-control" id="email" name="email" type="email" maxlength="255" autocomplete="email" required>
+					</div>
+					<div class="mb-3">
+						<label class="form-label" for="role">Rol</label>
+						<select class="form-select" id="role" name="role" required>
+							<option value="teacher">O'qituvchi</option>
+							<option value="student_parent">O'quvchi / ota-ona</option>
+							<option value="admin">Administrator</option>
+						</select>
+					</div>
+					<div class="mb-3">
+						<label class="form-label" for="password">Vaqtinchalik parol</label>
+						<input class="form-control" id="password" name="password" type="password" minlength="8" autocomplete="new-password" required>
+						<div class="form-text">Kamida 8 ta belgi. Parolni foydalanuvchiga xavfsiz tarzda yetkazing.</div>
+					</div>
+					<div>
+						<label class="form-label" for="password_confirmation">Parolni tasdiqlang</label>
+						<input class="form-control" id="password_confirmation" name="password_confirmation" type="password" minlength="8" autocomplete="new-password" required>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Bekor qilish</button>
+					<button class="btn btn-primary" type="submit"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Hisob yaratish</button>
+				</div>
+			</form>
+		</div>
+	</div>
+</div>
 {% endblock %}

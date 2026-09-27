@@ -106,6 +106,17 @@ def roles_required(*roles):
     return decorator
 
 
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for('login', next=request.url))
+        if current_user.role != 'admin':
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
 def _safe_next_url(target):
     if not target:
         return None
@@ -320,50 +331,18 @@ def register_routes(app):
             flash("Email yoki parol noto'g'ri.", 'error')
         return render_template('auth/login.html')
 
-    @app.route('/register', methods=['GET', 'POST'])
-    @limiter.limit('5 per hour', methods=['POST'])
-    def register():
-        if request.method == 'POST':
-            name = request.form.get('full_name', '').strip()
-            email = request.form.get('email', '').strip().lower()
-            password = request.form.get('password', '')
-            confirmation = request.form.get('password_confirmation', '')
-            try:
-                email = validate_email(email, check_deliverability=False).normalized
-                email_is_valid = True
-            except EmailNotValidError:
-                email_is_valid = False
-            if len(name) < 2 or len(name) > 120:
-                flash("Ism kamida 2 ta belgidan iborat bo'lishi kerak.", 'error')
-            elif not email_is_valid or len(email) > 255:
-                flash("Email manzilini tekshiring.", 'error')
-            elif len(password) < 12:
-                flash("Parol kamida 12 ta belgidan iborat bo'lishi kerak.", 'error')
-            elif password != confirmation:
-                flash("Parollar mos kelmadi.", 'error')
-            elif User.query.filter(func.lower(User.email) == email).first():
-                flash("Bu email allaqachon ro'yxatdan o'tgan.", 'error')
-            else:
-                user = User(full_name=name, email=email, role='student_parent')
-                user.set_password(password)
-                db.session.add(user)
-                try:
-                    db.session.commit()
-                except IntegrityError:
-                    db.session.rollback()
-                    flash("Bu email allaqachon ro'yxatdan o'tgan.", 'error')
-                    return render_template('auth/register.html')
-                login_user(user)
-                flash("Hisob yaratildi. Farzandingizni administrator bog'lab beradi.", 'success')
-                return redirect(url_for('dashboard'))
-        return render_template('auth/register.html')
-
     @app.post('/logout')
     @login_required
     def logout():
         logout_user()
         flash('Tizimdan chiqdingiz.', 'success')
         return redirect(url_for('login'))
+
+    @app.route('/register', methods=['GET', 'POST'])
+    @app.route('/auth/register', methods=['GET', 'POST'])
+    @csrf.exempt
+    def disabled_registration():
+        abort(403)
 
     @app.get('/')
     @login_required
@@ -1099,37 +1078,50 @@ def register_routes(app):
         flash("To'lov amalga oshirilgan deb belgilandi.", 'success')
         return redirect(url_for('payments'))
 
-    @app.route('/users', methods=['GET', 'POST'])
-    @roles_required('admin')
+    @app.get('/users', endpoint='users')
+    @app.get('/admin/users', endpoint='admin_users')
+    @admin_required
     def users():
-        if request.method == 'POST':
-            name = request.form.get('full_name', '').strip()
-            email = request.form.get('email', '').strip().lower()
-            role = request.form.get('role', '')
-            password = request.form.get('password', '')
-            try:
-                email = validate_email(email, check_deliverability=False).normalized
-                email_is_valid = True
-            except EmailNotValidError:
-                email_is_valid = False
-            if (
-                not name or len(name) > 120 or not email_is_valid or len(email) > 255
-                or role not in ('admin', 'teacher', 'student_parent') or len(password) < 12
-            ):
-                flash("Hisob ma'lumotlarini tekshiring (parol kamida 12 belgi).", 'error')
-            elif User.query.filter(func.lower(User.email) == email).first():
-                flash("Bu email allaqachon ro'yxatdan o'tgan.", 'error')
-            else:
-                user = User(full_name=name, email=email, role=role)
-                user.set_password(password)
-                db.session.add(user)
-                db.session.commit()
-                flash('Hisob yaratildi.', 'success')
-                return redirect(url_for('users'))
         return render_template('users.html', users=User.query.order_by(User.full_name).all())
 
+    @app.post('/admin/users/create')
+    @admin_required
+    def create_user():
+        name = request.form.get('full_name', '').strip()
+        raw_email = request.form.get('email', '').strip().lower()
+        role = request.form.get('role', '')
+        password = request.form.get('password', '')
+        confirmation = request.form.get('password_confirmation', '')
+        try:
+            email = validate_email(raw_email, check_deliverability=False).normalized
+        except EmailNotValidError:
+            email = ''
+
+        if (
+            len(name) < 2 or len(name) > 120 or not email or len(email) > 255
+            or role not in ('admin', 'teacher', 'student_parent')
+            or len(password) < 8 or password != confirmation
+        ):
+            flash("Hisob ma'lumotlarini tekshiring. Parol kamida 8 belgi bo'lsin.", 'error')
+            return redirect(url_for('admin_users'))
+        if User.query.filter(func.lower(User.email) == email).first():
+            flash("Bu email allaqachon ro'yxatdan o'tgan.", 'error')
+            return redirect(url_for('admin_users'))
+
+        user = User(full_name=name, email=email, role=role)
+        user.set_password(password)
+        db.session.add(user)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("Bu email allaqachon ro'yxatdan o'tgan.", 'error')
+            return redirect(url_for('admin_users'))
+        flash('User successfully created!', 'success')
+        return redirect(url_for('admin_users'))
+
     @app.post('/users/<int:user_id>/toggle')
-    @roles_required('admin')
+    @admin_required
     def toggle_user(user_id):
         user = db.get_or_404(User, user_id)
         if user.id == current_user.id:
@@ -1140,7 +1132,7 @@ def register_routes(app):
             user.enabled = not user.enabled
             db.session.commit()
             flash('Hisob holati yangilandi.', 'success')
-        return redirect(url_for('users'))
+        return redirect(url_for('admin_users'))
 
 
 def register_cli(app):

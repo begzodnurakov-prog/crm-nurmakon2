@@ -72,7 +72,7 @@
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('contact_support') }}">Aloqa / yordam</a></li>
                     {% endif %}
                     {% if current_user.role == 'admin' %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('users') }}">Foydalanuvchilar</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_users') }}">Foydalanuvchilar</a></li>
                     <li class="nav-item"><a class="nav-link d-flex align-items-center gap-1" href="{{ url_for('admin_inquiries') }}">Murojaatlar{% if open_inquiry_count %}<span class="badge rounded-pill text-bg-warning">{{ open_inquiry_count }}</span>{% endif %}</a></li>
                     {% endif %}
                 </ul>

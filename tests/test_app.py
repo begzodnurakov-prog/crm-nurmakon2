@@ -129,18 +129,70 @@ class CRMWorkflowTests(unittest.TestCase):
         self.assertIn(b'Algebra', response.data)
         self.assertIn(b'Chemistry', response.data)
 
-    def test_parent_registration_never_grants_privileged_role(self):
-        response = self.client.post('/register', data={
-            'full_name': 'New Parent',
-            'email': 'new-parent@example.com',
-            'password': 'Long-Password-903!',
+    def test_public_registration_routes_are_disabled(self):
+        for path in ('/register', '/auth/register'):
+            self.assertEqual(self.client.get(path).status_code, 403)
+            self.assertEqual(self.client.post(path, data={
+                'full_name': 'Outside Visitor',
+                'email': 'outside@example.test',
+                'password': 'Long-Password-903!',
+                'password_confirmation': 'Long-Password-903!',
+            }).status_code, 403)
+        login_page = self.client.get('/login')
+        self.assertEqual(login_page.status_code, 200)
+        self.assertNotIn(b"Ro'yxatdan o'tish", login_page.data)
+
+    def test_only_admin_can_create_users_with_hashed_passwords(self):
+        self.assertEqual(self.client.get('/admin/users').status_code, 302)
+        self._login('teacher@example.test')
+        self.assertEqual(self.client.get('/admin/users').status_code, 403)
+        response = self.client.post('/admin/users/create', data={
+            'full_name': 'Blocked User', 'email': 'blocked@example.test',
+            'role': 'admin', 'password': 'Long-Password-903!',
             'password_confirmation': 'Long-Password-903!',
         })
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 403)
+        self.client.post('/logout')
+
+        self._login('parent@example.test')
+        response = self.client.post('/admin/users/create', data={
+            'full_name': 'Blocked User', 'email': 'blocked@example.test',
+            'role': 'teacher', 'password': 'Long-Password-903!',
+            'password_confirmation': 'Long-Password-903!',
+        })
+        self.assertEqual(response.status_code, 403)
+        self.client.post('/logout')
+
+        self._login('admin@example.test')
+        response = self.client.post('/admin/users/create', data={
+            'full_name': 'New Teacher', 'email': 'NEW-TEACHER@example.com',
+            'role': 'teacher', 'password': 'Eight-888',
+            'password_confirmation': 'Eight-888',
+        }, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'User successfully created!', response.data)
+        self.assertIn(b'new-teacher@example.com', response.data)
+        self.assertNotIn(b'Eight-888', response.data)
         with self.app.app_context():
-            user = User.query.filter_by(email='new-parent@example.com').one()
-            self.assertEqual(user.role, 'student_parent')
-            self.assertTrue(user.check_password('Long-Password-903!'))
+            user = User.query.filter_by(email='new-teacher@example.com').one()
+            self.assertEqual(user.role, 'teacher')
+            self.assertNotEqual(user.password_hash, 'Eight-888')
+            self.assertTrue(user.check_password('Eight-888'))
+
+        duplicate = self.client.post('/admin/users/create', data={
+            'full_name': 'Duplicate User', 'email': 'New-Teacher@example.com',
+            'role': 'teacher', 'password': 'Another-Password-903!',
+            'password_confirmation': 'Another-Password-903!',
+        }, follow_redirects=True)
+        self.assertIn(b'Bu email allaqachon', duplicate.data)
+        escalation = self.client.post('/admin/users/create', data={
+            'full_name': 'Invalid Role', 'email': 'invalid-role@example.test',
+            'role': 'manager', 'password': 'Another-Password-903!',
+            'password_confirmation': 'Another-Password-903!',
+        }, follow_redirects=True)
+        self.assertIn(b'Hisob ma&#39;lumotlarini tekshiring.', escalation.data)
+        with self.app.app_context():
+            self.assertIsNone(User.query.filter_by(email='invalid-role@example.test').first())
 
     def test_teacher_creates_session_and_marks_late_attendance(self):
         self._login('teacher@example.test')
@@ -563,7 +615,7 @@ class CRMWorkflowTests(unittest.TestCase):
         self.assertIn('id="installAppButton"', login_page)
         login_response.close()
 
-    def test_parent_registration_and_student_search_pages_render(self):
+    def test_admin_user_and_student_search_pages_render(self):
         self._login('admin@example.test')
         response = self.client.get('/students?q=Test')
         self.assertEqual(response.status_code, 200)
@@ -571,7 +623,17 @@ class CRMWorkflowTests(unittest.TestCase):
         self.assertNotIn(b'Other Student', response.data)
         self.assertEqual(self.client.get('/groups').status_code, 200)
         self.assertEqual(self.client.get('/payments').status_code, 200)
+        users_page = self.client.get('/admin/users')
+        self.assertEqual(users_page.status_code, 200)
+        self.assertIn(b'action="/admin/users/create"', users_page.data)
+        self.assertIn(b'createUserModal', users_page.data)
+        self.assertIn(b'Yaratilgan', users_page.data)
         self.assertEqual(self.client.get('/users').status_code, 200)
+
+        self.client.post(f'/users/{self.admin_id}/toggle', follow_redirects=True)
+        with self.app.app_context():
+            admin = db.session.get(User, self.admin_id)
+            self.assertTrue(admin.enabled)
 
 
 if __name__ == '__main__':
