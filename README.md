@@ -70,6 +70,10 @@ python -m flask --app app send-reminders --days 3
 
 These notifications are stored in the CRM and shown in the dashboard/notification center; this implementation does not send email or SMS. Parents can submit an inquiry under **Aloqa / yordam** and see replies there. Administrators review, respond to, and resolve requests under **Murojaatlar**. Link parent accounts to students in the student editor to enable student-specific alerts.
 
+## Courses and groups
+
+Administrators manage course titles, monthly prices, and durations under **Kurslar**, then create groups with an assigned course, teacher, room, meeting-day pattern, and start time under **Guruhlar**. A student can be enrolled in multiple groups from each group's detail page; existing single-group assignments are migrated as enrollments and remain the student's primary group for compatibility. Teachers and administrators open daily attendance from the teacher portal or group detail, select a date, and save the roster in one batch. Monthly rates include session and daily marks, treat late as attended, exclude excused records, and prefer a daily mark when the same student has a session mark on that date. Apply the new schema revisions to an existing CRM with `python -m flask --app app db upgrade` after backing up the database.
+
 ## Schema changes after bootstrap
 
 For future model changes, generate and review a migration, then commit the generated script:

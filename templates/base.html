@@ -61,6 +61,7 @@
                     {% if current_user.role == 'admin' %}
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('students') }}">O'quvchilar</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('groups') }}">Guruhlar</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('courses') }}">Kurslar</a></li>
                     {% endif %}
                     {% if current_user.role in ('admin','teacher') %}
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('sessions') }}">Darslar va davomat</a></li>

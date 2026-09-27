@@ -16,7 +16,7 @@ from werkzeug.exceptions import HTTPException
 
 from config import Config
 from extensions import csrf, db, limiter, login_manager, migrate
-from models import Attendance, ClassSession, Group, Inquiry, Notification, Payment, Student, User
+from models import Attendance, ClassSession, Course, Group, Inquiry, Notification, Payment, Student, User
 from schema_bootstrap import initialize_database
 
 
@@ -24,6 +24,12 @@ ROLE_LABELS = {
     'admin': 'Administrator',
     'teacher': "O'qituvchi",
     'student_parent': "O'quvchi / ota-ona",
+}
+ATTENDANCE_STATUS_LABELS = {
+    'present': 'Present',
+    'absent': 'Absent',
+    'late': 'Late',
+    'excused': 'Excused',
 }
 
 
@@ -113,7 +119,7 @@ def _safe_next_url(target):
 def _student_scope_query(user):
     query = Student.query
     if user.role == 'teacher':
-        query = query.join(Group).filter(Group.teacher_id == user.id)
+        query = query.filter(Student.groups.any(Group.teacher_id == user.id))
     elif user.role == 'student_parent':
         query = query.join(Student.parents).filter(User.id == user.id)
     return query
@@ -124,7 +130,7 @@ def _group_scope_query(user):
     if user.role == 'teacher':
         query = query.filter(Group.teacher_id == user.id)
     elif user.role == 'student_parent':
-        query = query.join(Group.students).join(Student.parents).filter(User.id == user.id)
+        query = query.join(Group.enrolled_students).join(Student.parents).filter(User.id == user.id)
     return query.distinct()
 
 
@@ -138,6 +144,107 @@ def _parse_date(value):
 
 def _parse_datetime_local(value):
     return datetime.strptime(value, '%Y-%m-%dT%H:%M')
+
+
+def _group_form_values(form):
+    title = form.get('title', form.get('name', '')).strip()
+    course_id = form.get('course_id', '').strip()
+    course = db.session.get(Course, int(course_id)) if course_id else None
+    course_name = form.get('course_name', '').strip()
+    if course is None and course_name:
+        course = Course.query.filter_by(title=course_name).first()
+        if course is None:
+            course = Course(title=course_name)
+            db.session.add(course)
+            db.session.flush()
+
+    teacher_id = form.get('teacher_id', '').strip()
+    teacher = db.session.get(User, int(teacher_id)) if teacher_id else None
+    schedule_days = form.get('schedule_days', '').strip()
+    start_time_text = form.get('start_time', '').strip()
+    if schedule_days not in ('', 'Mon-Wed-Fri', 'Tue-Thu-Sat'):
+        raise ValueError
+    if bool(schedule_days) != bool(start_time_text):
+        raise ValueError
+    start_time = datetime.strptime(start_time_text, '%H:%M').time() if start_time_text else None
+    schedule = f'{schedule_days} {start_time:%H:%M}' if start_time else form.get('schedule', '').strip()
+    room_number = form.get('room_number', '').strip()
+    if (
+        not title or len(title) > 100 or course is None or len(course.title) > 100
+        or (teacher_id and (teacher is None or teacher.role != 'teacher' or not teacher.enabled))
+        or len(room_number) > 80 or len(schedule) > 250
+    ):
+        raise ValueError
+    return {
+        'title': title,
+        'course': course,
+        'teacher': teacher,
+        'schedule_days': schedule_days,
+        'start_time': start_time,
+        'room_number': room_number,
+        'schedule': schedule,
+    }
+
+
+def _attendance_roster_query(group_id):
+    return Student.query.filter(
+        Student.status == 'active',
+        or_(
+            Student.group_id == group_id,
+            Student.groups.any(Group.id == group_id),
+        ),
+    )
+
+
+def calculate_monthly_attendance_percentages(group_id, year, month):
+    if month < 1 or month > 12:
+        raise ValueError('month must be between 1 and 12')
+    month_start = date(year, month, 1)
+    next_month = date(year + (month == 12), month % 12 + 1, 1)
+    students = _attendance_roster_query(group_id).all()
+    totals = {student.id: [0, 0] for student in students}
+    records = Attendance.query.filter(
+        Attendance.group_id == group_id,
+        Attendance.session_date >= month_start,
+        Attendance.session_date < next_month,
+    ).all()
+    daily_dates = {
+        (record.student_id, record.session_date)
+        for record in records if record.session_id is None
+    }
+    for record in records:
+        if record.session_id is not None and (record.student_id, record.session_date) in daily_dates:
+            continue
+        if record.status == 'excused':
+            continue
+        total, attended = totals.setdefault(record.student_id, [0, 0])
+        totals[record.student_id] = [total + 1, attended + (record.status in ('present', 'late'))]
+    return {
+        student_id: round(attended / total * 100, 1) if total else 0.0
+        for student_id, (total, attended) in totals.items()
+    }
+
+
+def _course_form_values(form):
+    title = form.get('title', '').strip()
+    price = Decimal(form.get('price', ''))
+    duration_months = int(form.get('duration_months', ''))
+    if (
+        not title or len(title) > 120 or not price.is_finite() or price < 0
+        or duration_months < 1 or duration_months > 120
+    ):
+        raise ValueError
+    return title, price, duration_months
+
+
+def _sync_student_payment_state(student):
+    pending_payments = Payment.query.filter_by(student_id=student.id, status='pending')
+    student.balance = pending_payments.with_entities(
+        func.coalesce(func.sum(Payment.amount), 0)
+    ).scalar()
+    has_overdue = pending_payments.filter(Payment.due_date < date.today()).first() is not None
+    has_pending = pending_payments.first() is not None
+    student.payment_status = 'overdue' if has_overdue else 'pending' if has_pending else 'paid'
 
 
 def _linked_parent_ids(form):
@@ -262,23 +369,46 @@ def register_routes(app):
     @login_required
     def dashboard():
         today = date.today()
-        this_month = today.strftime('%Y-%m')
+        month_starts = []
+        for months_ago in reversed(range(6)):
+            month_index = today.year * 12 + today.month - 1 - months_ago
+            month_starts.append(date(month_index // 12, month_index % 12 + 1, 1))
+        next_month = date(today.year + (today.month == 12), today.month % 12 + 1, 1)
         student_query = _student_scope_query(current_user)
         group_query = _group_scope_query(current_user)
         payment_query = Payment.query.join(Student)
         if current_user.role == 'teacher':
-            payment_query = payment_query.join(Group).filter(Group.teacher_id == current_user.id)
+            payment_query = payment_query.filter(Student.groups.any(Group.teacher_id == current_user.id))
         elif current_user.role == 'student_parent':
             payment_query = payment_query.join(Student.parents).filter(User.id == current_user.id)
 
-        income = payment_query.filter(Payment.status == 'paid', Payment.month == this_month).with_entities(
+        income = payment_query.filter(
+            Payment.status == 'paid',
+            Payment.payment_date >= month_starts[-1],
+            Payment.payment_date < next_month,
+        ).with_entities(
             func.coalesce(func.sum(Payment.amount), 0)
-        ).scalar()
+        ).scalar() or 0
+        revenue_rows = payment_query.filter(
+            Payment.status == 'paid',
+            Payment.payment_date >= month_starts[0],
+            Payment.payment_date < next_month,
+        ).with_entities(Payment.payment_date, Payment.amount).all()
+        revenue_by_month = {month.strftime('%Y-%m'): 0 for month in month_starts}
+        for payment_date, amount in revenue_rows:
+            month_key = payment_date.strftime('%Y-%m')
+            revenue_by_month[month_key] = round(revenue_by_month[month_key] + float(amount), 2)
+        course_distribution = student_query.filter(Student.status == 'active').with_entities(
+            Student.course, func.count(func.distinct(Student.id)),
+        ).group_by(Student.course).order_by(Student.course).all()
         pending_query = payment_query.filter(Payment.status == 'pending')
         paid_count = payment_query.filter(Payment.status == 'paid').count()
         pending_count = pending_query.filter(or_(Payment.due_date.is_(None), Payment.due_date >= today)).count()
         overdue_count = pending_query.filter(Payment.due_date < today).count()
         debt_total = pending_query.with_entities(func.coalesce(func.sum(Payment.amount), 0)).scalar()
+        debtor_count = pending_query.filter(Payment.due_date < today).with_entities(
+            func.count(func.distinct(Payment.student_id))
+        ).scalar() or 0
         notifications = Notification.query.filter_by(user_id=current_user.id).order_by(
             Notification.created_at.desc(), Notification.id.desc(),
         ).limit(6).all()
@@ -288,13 +418,18 @@ def register_routes(app):
         if current_user.role == 'teacher':
             upcoming_sessions = upcoming_sessions.filter(Group.teacher_id == current_user.id)
         elif current_user.role == 'student_parent':
-            upcoming_sessions = upcoming_sessions.join(Group.students).join(Student.parents).filter(User.id == current_user.id)
+            upcoming_sessions = upcoming_sessions.join(Group.enrolled_students).join(Student.parents).filter(User.id == current_user.id)
 
         return render_template(
             'dashboard.html',
-            student_count=student_query.distinct().count(),
+            student_count=student_query.filter(Student.status == 'active').distinct().count(),
             group_count=group_query.filter(Group.is_active.is_(True)).count(),
             monthly_income=income,
+            debtor_count=debtor_count,
+            revenue_labels=[month.strftime('%b %Y') for month in month_starts],
+            revenue_values=[revenue_by_month[month.strftime('%Y-%m')] for month in month_starts],
+            course_labels=[course or 'Unassigned' for course, _ in course_distribution],
+            course_values=[count for _, count in course_distribution],
             paid_count=paid_count,
             pending_count=pending_count,
             overdue_count=overdue_count,
@@ -450,7 +585,7 @@ def register_routes(app):
                     raise ValueError("O'quvchi holati noto'g'ri.")
                 student = Student(
                     name=name, phone=phone, course=course, enrollment_date=enrollment_date,
-                    status=status, group=group, parents=linked_parents,
+                    status=status, group=group, groups=[group], parents=linked_parents,
                 )
                 db.session.add(student)
                 db.session.commit()
@@ -459,7 +594,7 @@ def register_routes(app):
             except (ValueError, KeyError):
                 db.session.rollback()
                 flash("O'quvchi ma'lumotlarini tekshiring.", 'error')
-        query = Student.query.join(Group, isouter=True)
+        query = Student.query.outerjoin(Student.group)
         search = request.args.get('q', '').strip()[:100]
         if search:
             pattern = f'%{search}%'
@@ -492,6 +627,8 @@ def register_routes(app):
                 student.enrollment_date = _parse_date(request.form.get('enrollment_date', ''))
                 student.status = status
                 student.group = group
+                if group not in student.groups:
+                    student.groups.append(group)
                 student.parents = linked_parents
                 if (
                     not student.name or len(student.name) > 100
@@ -516,71 +653,256 @@ def register_routes(app):
         flash("O'quvchi arxivlandi. To'lov va davomat tarixi saqlandi.", 'success')
         return redirect(url_for('students'))
 
+    @app.route('/courses', methods=['GET', 'POST'])
+    @roles_required('admin')
+    def courses():
+        if request.method == 'POST':
+            try:
+                title, price, duration_months = _course_form_values(request.form)
+                db.session.add(Course(title=title, price=price, duration_months=duration_months))
+                db.session.commit()
+                flash('Kurs yaratildi.', 'success')
+                return redirect(url_for('courses'))
+            except (ValueError, InvalidOperation, TypeError):
+                db.session.rollback()
+                flash('Kurs ma’lumotlarini tekshiring.', 'error')
+            except IntegrityError:
+                db.session.rollback()
+                flash('Bu kurs nomi band.', 'error')
+        return render_template('courses.html', courses=Course.query.order_by(Course.title).all())
+
+    @app.route('/courses/<int:course_id>/edit', methods=['GET', 'POST'])
+    @roles_required('admin')
+    def edit_course(course_id):
+        course = db.get_or_404(Course, course_id)
+        if request.method == 'POST':
+            try:
+                title, price, duration_months = _course_form_values(request.form)
+                course.title = title
+                course.price = price
+                course.duration_months = duration_months
+                for group in course.groups:
+                    group.course_name = title
+                db.session.commit()
+                flash('Kurs ma’lumotlari saqlandi.', 'success')
+                return redirect(url_for('courses'))
+            except (ValueError, InvalidOperation, TypeError):
+                db.session.rollback()
+                flash('Kurs ma’lumotlarini tekshiring.', 'error')
+            except IntegrityError:
+                db.session.rollback()
+                flash('Bu kurs nomi band.', 'error')
+        return render_template('course_form.html', course=course)
+
+    @app.post('/courses/<int:course_id>/delete')
+    @roles_required('admin')
+    def delete_course(course_id):
+        course = db.get_or_404(Course, course_id)
+        if course.groups:
+            flash('Avval ushbu kursga bog‘langan guruhlarni boshqa kursga o‘tkazing.', 'error')
+        else:
+            db.session.delete(course)
+            db.session.commit()
+            flash('Kurs o‘chirildi.', 'success')
+        return redirect(url_for('courses'))
+
     @app.route('/groups', methods=['GET', 'POST'])
     @roles_required('admin')
     def groups():
         teachers = User.query.filter_by(role='teacher', enabled=True).order_by(User.full_name).all()
+        courses = Course.query.order_by(Course.title).all()
         if request.method == 'POST':
-            name = request.form.get('name', '').strip()
-            course_name = request.form.get('course_name', '').strip()
-            schedule = request.form.get('schedule', '').strip()
-            teacher_id = request.form.get('teacher_id') or None
-            teacher = db.session.get(User, int(teacher_id)) if teacher_id else None
-            if (
-                not name or len(name) > 100 or not course_name or len(course_name) > 100
-                or len(schedule) > 250
-                or (teacher_id and (teacher is None or teacher.role != 'teacher' or not teacher.enabled))
-            ):
-                flash("Guruh ma'lumotlarini tekshiring.", 'error')
-            else:
-                db.session.add(Group(name=name, course_name=course_name, schedule=schedule, teacher=teacher))
-                try:
-                    db.session.commit()
-                    flash("Guruh yaratildi.", 'success')
-                    return redirect(url_for('groups'))
-                except IntegrityError:
-                    db.session.rollback()
-                    flash("Bu guruh nomi band.", 'error')
-        return render_template('groups.html', groups=Group.query.order_by(Group.name).all(), teachers=teachers)
+            try:
+                values = _group_form_values(request.form)
+                db.session.add(Group(
+                    title=values['title'], course_name=values['course'].title,
+                    course=values['course'], teacher=values['teacher'], schedule=values['schedule'],
+                    schedule_days=values['schedule_days'], start_time=values['start_time'],
+                    room_number=values['room_number'],
+                ))
+                db.session.commit()
+                flash('Guruh yaratildi.', 'success')
+                return redirect(url_for('groups'))
+            except (ValueError, TypeError):
+                db.session.rollback()
+                flash('Guruh ma’lumotlarini tekshiring.', 'error')
+            except IntegrityError:
+                db.session.rollback()
+                flash('Bu guruh nomi band.', 'error')
+        return render_template(
+            'groups.html', groups=Group.query.order_by(Group.name).all(),
+            teachers=teachers, courses=courses,
+        )
+
+    @app.get('/groups/<int:group_id>')
+    @roles_required('admin', 'teacher')
+    def group_detail(group_id):
+        group = db.get_or_404(Group, group_id)
+        if not _can_manage_group(current_user, group):
+            abort(403)
+        group_students = Student.query.filter(or_(
+            Student.group_id == group.id,
+            Student.groups.any(Group.id == group.id),
+        )).order_by(Student.name).all()
+        enrolled_ids = {student.id for student in group_students}
+        available_students = [
+            student for student in Student.query.filter_by(status='active').order_by(Student.name).all()
+            if student.id not in enrolled_ids
+        ]
+        return render_template(
+            'group_detail.html', group=group, group_students=group_students,
+            available_students=available_students,
+        )
+
+    @app.route('/groups/<int:group_id>/attendance', methods=['GET', 'POST'])
+    @roles_required('admin', 'teacher')
+    def group_daily_attendance(group_id):
+        group = db.get_or_404(Group, group_id)
+        if not _can_manage_group(current_user, group):
+            abort(403)
+        try:
+            attendance_date = _parse_date(request.values.get('date') or date.today().isoformat())
+        except ValueError:
+            flash('Davomat sanasini tekshiring.', 'error')
+            return redirect(url_for('group_daily_attendance', group_id=group.id))
+        if attendance_date > date.today():
+            flash('Kelajak sanasi uchun davomat belgilab bo‘lmaydi.', 'error')
+            return redirect(url_for('group_daily_attendance', group_id=group.id))
+
+        students = _attendance_roster_query(group.id).order_by(Student.name).all()
+        if request.method == 'POST':
+            submitted = []
+            for student in students:
+                status = request.form.get(f'status_{student.id}', '')
+                notes = request.form.get(f'notes_{student.id}', '').strip()
+                if status not in ATTENDANCE_STATUS_LABELS or len(notes) > 500:
+                    flash('Har bir o‘quvchi uchun holatni tanlang va izohni tekshiring.', 'error')
+                    return redirect(url_for(
+                        'group_daily_attendance', group_id=group.id,
+                        date=attendance_date.isoformat(),
+                    ))
+                submitted.append((student, status, notes))
+
+            records = {
+                record.student_id: record
+                for record in Attendance.query.filter_by(
+                    group_id=group.id, session_date=attendance_date, session_id=None,
+                ).all()
+            }
+            now = datetime.now()
+            for student, status, notes in submitted:
+                record = records.get(student.id)
+                if record is None:
+                    record = Attendance(
+                        student=student, group=group, session_date=attendance_date,
+                        session_id=None, status=status, notes=notes,
+                    )
+                    db.session.add(record)
+                else:
+                    record.status = status
+                    record.notes = notes
+                record.marked_by_id = current_user.id
+                record.marked_at = now
+            try:
+                db.session.commit()
+                flash('Guruh davomati saqlandi.', 'success')
+            except IntegrityError:
+                db.session.rollback()
+                flash('Davomat boshqa foydalanuvchi tomonidan yangilandi. Sahifani tekshirib qayta saqlang.', 'error')
+            return redirect(url_for(
+                'group_daily_attendance', group_id=group.id,
+                date=attendance_date.isoformat(),
+            ))
+
+        records = {
+            record.student_id: record
+            for record in Attendance.query.filter_by(
+                group_id=group.id, session_date=attendance_date, session_id=None,
+            ).all()
+        }
+        monthly_percentages = calculate_monthly_attendance_percentages(
+            group.id, attendance_date.year, attendance_date.month,
+        )
+        return render_template(
+            'daily_attendance.html', group=group, students=students, records=records,
+            attendance_date=attendance_date,
+            today_iso=date.today().isoformat(),
+            monthly_percentages=monthly_percentages,
+            status_labels=ATTENDANCE_STATUS_LABELS,
+        )
+
+    @app.post('/groups/<int:group_id>/students')
+    @roles_required('admin')
+    def add_group_student(group_id):
+        group = db.get_or_404(Group, group_id)
+        try:
+            student = db.get_or_404(Student, int(request.form.get('student_id', '')))
+        except (ValueError, TypeError):
+            flash('O‘quvchi tanlovini tekshiring.', 'error')
+            return redirect(url_for('group_detail', group_id=group.id))
+        if not group.is_active or student.status != 'active':
+            flash('Faqat faol guruhga faol o‘quvchi qo‘shish mumkin.', 'error')
+        else:
+            if group not in student.groups:
+                student.groups.append(group)
+            if student.group is None:
+                student.group = group
+            db.session.commit()
+            flash('O‘quvchi guruhga qo‘shildi.', 'success')
+        return redirect(url_for('group_detail', group_id=group.id))
+
+    @app.post('/groups/<int:group_id>/students/<int:student_id>/remove')
+    @roles_required('admin')
+    def remove_group_student(group_id, student_id):
+        group = db.get_or_404(Group, group_id)
+        student = db.get_or_404(Student, student_id)
+        if group in student.groups:
+            student.groups.remove(group)
+        if student.group_id == group.id:
+            student.group = student.groups[0] if student.groups else None
+        db.session.commit()
+        flash('O‘quvchi guruhdan chiqarildi.', 'success')
+        return redirect(url_for('group_detail', group_id=group.id))
 
     @app.route('/groups/<int:group_id>/edit', methods=['GET', 'POST'])
     @roles_required('admin')
     def edit_group(group_id):
         group = db.get_or_404(Group, group_id)
         teachers = User.query.filter_by(role='teacher', enabled=True).order_by(User.full_name).all()
+        courses = Course.query.order_by(Course.title).all()
         if request.method == 'POST':
-            teacher_id = request.form.get('teacher_id') or None
-            teacher = db.session.get(User, int(teacher_id)) if teacher_id else None
-            if teacher_id and (teacher is None or teacher.role != 'teacher' or not teacher.enabled):
-                flash("O'qituvchi tanlovini tekshiring.", 'error')
-            else:
-                group.name = request.form.get('name', '').strip()
-                group.course_name = request.form.get('course_name', '').strip()
-                group.schedule = request.form.get('schedule', '').strip()
-                group.teacher = teacher
+            try:
+                values = _group_form_values(request.form)
+                group.title = values['title']
+                group.course = values['course']
+                group.course_name = values['course'].title
+                group.teacher = values['teacher']
+                group.schedule = values['schedule']
+                group.schedule_days = values['schedule_days']
+                group.start_time = values['start_time']
+                group.room_number = values['room_number']
                 group.is_active = request.form.get('is_active') == 'on'
-                if group.name and len(group.name) <= 100 and group.course_name and len(group.course_name) <= 100 and len(group.schedule) <= 250:
-                    try:
-                        db.session.commit()
-                        flash("Guruh ma'lumotlari saqlandi.", 'success')
-                        return redirect(url_for('groups'))
-                    except IntegrityError:
-                        db.session.rollback()
-                        flash("Bu guruh nomi band.", 'error')
-                else:
-                    flash("Guruh nomi va kurs majburiy.", 'error')
-        return render_template('group_form.html', group=group, teachers=teachers)
+                db.session.commit()
+                flash('Guruh ma’lumotlari saqlandi.', 'success')
+                return redirect(url_for('group_detail', group_id=group.id))
+            except (ValueError, TypeError):
+                db.session.rollback()
+                flash('Guruh ma’lumotlarini tekshiring.', 'error')
+            except IntegrityError:
+                db.session.rollback()
+                flash('Bu guruh nomi band.', 'error')
+        return render_template('group_form.html', group=group, teachers=teachers, courses=courses)
 
     @app.post('/groups/<int:group_id>/delete')
     @roles_required('admin')
     def delete_group(group_id):
         group = db.get_or_404(Group, group_id)
-        if group.students or group.sessions:
-            flash("Tarixni saqlash uchun faqat o'quvchi va darslari yo'q guruhni o'chirish mumkin.", 'error')
+        if group.enrolled_students or group.students or group.sessions or group.attendance_records:
+            flash('Tarixni saqlash uchun faqat o‘quvchi va darslari yo‘q guruhni o‘chirish mumkin.', 'error')
         else:
             db.session.delete(group)
             db.session.commit()
-            flash("Guruh o'chirildi.", 'success')
+            flash('Guruh o‘chirildi.', 'success')
         return redirect(url_for('groups'))
 
     @app.route('/sessions', methods=['GET', 'POST'])
@@ -608,6 +930,7 @@ def register_routes(app):
         return render_template(
             'sessions.html', groups=available_groups,
             sessions=upcoming.order_by(ClassSession.starts_at.desc()).limit(100).all(),
+            today_label=date.today().strftime('%d.%m.%Y'),
         )
 
     @app.route('/sessions/<int:session_id>/attendance', methods=['GET', 'POST'])
@@ -616,8 +939,12 @@ def register_routes(app):
         class_session = db.get_or_404(ClassSession, session_id)
         if not _can_manage_group(current_user, class_session.group):
             abort(403)
-        group_students = Student.query.filter_by(
-            group_id=class_session.group_id, status='active'
+        group_students = Student.query.filter(
+            Student.status == 'active',
+            or_(
+                Student.group_id == class_session.group_id,
+                Student.groups.any(Group.id == class_session.group_id),
+            ),
         ).order_by(Student.name).all()
         if request.method == 'POST':
             submitted = []
@@ -631,7 +958,10 @@ def register_routes(app):
                 record = Attendance.query.filter_by(student_id=student.id, session_id=session_id).first()
                 status_changed = record is None or record.status != status
                 if record is None:
-                    record = Attendance(student=student, session=class_session, status=status)
+                    record = Attendance(
+                        student=student, session=class_session, group=class_session.group,
+                        session_date=class_session.starts_at.date(), status=status,
+                    )
                     db.session.add(record)
                 else:
                     record.status = status
@@ -665,43 +995,95 @@ def register_routes(app):
             try:
                 student = db.get_or_404(Student, int(request.form.get('student_id', '')))
                 amount = Decimal(request.form.get('amount', ''))
-                month = request.form.get('month', '')
+                month = request.form.get('month_covered', request.form.get('month', ''))
                 due_date = _parse_date(request.form.get('due_date', ''))
                 status = request.form.get('status', '')
+                payment_type = request.form.get('payment_type', 'cash')
+                payment_date = _parse_date(request.form['payment_date']) if request.form.get('payment_date') else date.today()
+                receipt_number = request.form.get('receipt_number', '').strip() or None
                 datetime.strptime(month, '%Y-%m')
-                if not amount.is_finite() or amount <= 0 or status not in ('paid', 'pending'):
+                if (
+                    not amount.is_finite() or amount <= 0 or status not in ('paid', 'pending')
+                    or payment_type not in ('cash', 'card') or len(receipt_number or '') > 40
+                ):
+                    raise ValueError
+                if receipt_number and Payment.query.filter_by(receipt_number=receipt_number).first():
                     raise ValueError
                 payment = Payment(
                     student=student, amount=amount, month=month, due_date=due_date,
+                    payment_type=payment_type,
+                    payment_date=payment_date if status == 'paid' else None,
+                    receipt_number=receipt_number,
                     status=status, paid_at=datetime.now() if status == 'paid' else None,
                 )
                 db.session.add(payment)
+                db.session.flush()
+                if status == 'paid' and payment.receipt_number is None:
+                    payment.receipt_number = f'PAY-{date.today():%Y%m%d}-{payment.id:06d}'
+                _sync_student_payment_state(student)
                 db.session.commit()
                 flash("To'lov yozuvi saqlandi.", 'success')
                 return redirect(url_for('payments'))
-            except (ValueError, InvalidOperation, KeyError):
+            except (ValueError, InvalidOperation, KeyError, TypeError):
                 db.session.rollback()
                 flash("To'lov ma'lumotlarini tekshiring.", 'error')
 
-        query = Payment.query.join(Student)
+        base_query = Payment.query.join(Student)
         if current_user.role == 'teacher':
-            query = query.join(Group).filter(Group.teacher_id == current_user.id)
+            base_query = base_query.filter(Student.groups.any(Group.teacher_id == current_user.id))
         elif current_user.role == 'student_parent':
-            query = query.join(Student.parents).filter(User.id == current_user.id)
+            base_query = base_query.join(Student.parents).filter(User.id == current_user.id)
+        start_date = request.args.get('from_date', '').strip()
+        end_date = request.args.get('to_date', '').strip()
+        student_filter = request.args.get('student_id', '').strip()
+        try:
+            start_day = _parse_date(start_date) if start_date else None
+            end_day = _parse_date(end_date) if end_date else None
+            if start_day and end_day and start_day > end_day:
+                raise ValueError
+            if start_day:
+                base_query = base_query.filter(Payment.payment_date >= start_day)
+            if end_day:
+                base_query = base_query.filter(Payment.payment_date <= end_day)
+            if student_filter:
+                base_query = base_query.filter(Payment.student_id == int(student_filter))
+        except (ValueError, TypeError):
+            flash("Sana yoki o'quvchi filtri noto'g'ri.", 'error')
+            return redirect(url_for('payments'))
+        revenue = base_query.filter(Payment.status == 'paid').with_entities(
+            func.coalesce(func.sum(Payment.amount), 0)
+        ).scalar()
+        query = base_query
         status_filter = request.args.get('status', '').strip()
         if status_filter == 'overdue':
             query = query.filter(Payment.status == 'pending', Payment.due_date < date.today())
         elif status_filter in ('paid', 'pending'):
             query = query.filter(Payment.status == status_filter)
         payment_page = db.paginate(
-            query.order_by(Payment.month.desc(), Payment.id.desc()).statement,
+            query.order_by(Payment.payment_date.desc(), Payment.month.desc(), Payment.id.desc()).statement,
             per_page=50, max_per_page=100, error_out=False,
         )
         students_for_payment = Student.query.order_by(Student.name).all() if current_user.role == 'admin' else []
+        filter_students = _student_scope_query(current_user).order_by(Student.name).all()
         return render_template(
             'payments.html', payments=payment_page.items, payment_page=payment_page,
-            students=students_for_payment, status_filter=status_filter,
+            students=students_for_payment, filter_students=filter_students,
+            status_filter=status_filter, revenue=revenue,
+            from_date=start_date, to_date=end_date, student_filter=student_filter,
+            today_iso=date.today().isoformat(),
         )
+
+    @app.get('/payments/debtors')
+    @roles_required('admin')
+    def payment_debtors():
+        overdue_students = Student.query.join(Payment).filter(
+            Payment.status == 'pending', Payment.due_date < date.today(),
+        ).distinct().order_by(Student.name).all()
+        for student in overdue_students:
+            _sync_student_payment_state(student)
+        if overdue_students:
+            db.session.commit()
+        return render_template('debtors.html', students=overdue_students)
 
     @app.post('/payments/<int:payment_id>/mark-paid')
     @roles_required('admin')
@@ -709,6 +1091,10 @@ def register_routes(app):
         payment = db.get_or_404(Payment, payment_id)
         payment.status = 'paid'
         payment.paid_at = datetime.now()
+        payment.payment_date = date.today()
+        if payment.receipt_number is None:
+            payment.receipt_number = f'PAY-{date.today():%Y%m%d}-{payment.id:06d}'
+        _sync_student_payment_state(payment.student)
         db.session.commit()
         flash("To'lov amalga oshirilgan deb belgilandi.", 'success')
         return redirect(url_for('payments'))
@@ -818,7 +1204,11 @@ def register_cli(app):
         ).all()
         for class_session in upcoming_sessions:
             start_label = class_session.starts_at.strftime('%d.%m.%Y %H:%M')
-            for student in class_session.group.students:
+            group_students = Student.query.filter(or_(
+                Student.group_id == class_session.group_id,
+                Student.groups.any(Group.id == class_session.group_id),
+            )).all()
+            for student in group_students:
                 if student.status != 'active':
                     continue
                 for parent in student.parents:

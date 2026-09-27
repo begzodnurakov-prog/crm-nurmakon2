@@ -1,10 +1,164 @@
 {% extends 'base.html' %}
 {% block title %}To'lovlar | Crm_nurmakon{% endblock %}
 {% block content %}
-<header class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4"><div><p class="section-kicker mb-1">MOLIYA</p><h1 class="page-heading mb-0">To'lovlar tarixi</h1></div><form class="d-flex gap-2" method="GET"><label class="visually-hidden" for="status">Holat bo'yicha filtrlash</label><select class="form-select" name="status" id="status"><option value="">Barcha holatlar</option><option value="paid" {% if status_filter=='paid' %}selected{% endif %}>To'langan</option><option value="pending" {% if status_filter=='pending' %}selected{% endif %}>Kutilmoqda</option><option value="overdue" {% if status_filter=='overdue' %}selected{% endif %}>Muddati o'tgan</option></select><button class="btn btn-outline-secondary" type="submit">Filtr</button></form></header>
-{% if current_user.role == 'admin' %}<section class="card section-card mb-4"><div class="card-body"><h2 class="section-title mb-3">To'lov qo'shish</h2><form class="row g-3 align-items-end" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="col-md-4"><label class="form-label" for="student_id">O'quvchi</label><select class="form-select" id="student_id" name="student_id" required><option value="">Tanlang</option>{% for student in students %}<option value="{{ student.id }}">{{ student.name }} · {{ student.group.name if student.group else student.course }}</option>{% endfor %}</select></div><div class="col-md-2"><label class="form-label" for="amount">Summa</label><input class="form-control" id="amount" name="amount" type="number" min="0.01" step="0.01" required></div><div class="col-md-2"><label class="form-label" for="month">Oy</label><input class="form-control" id="month" name="month" type="month" required></div><div class="col-md-2"><label class="form-label" for="due_date">To'lov muddati</label><input class="form-control" id="due_date" name="due_date" type="date" required></div><div class="col-md-2"><label class="form-label" for="new_status">Holat</label><select class="form-select" id="new_status" name="status"><option value="pending">Kutilmoqda</option><option value="paid">To'langan</option></select></div><div class="col-12"><button class="btn btn-primary" type="submit">To'lovni saqlash</button></div></form></div></section>{% endif %}
-<section class="card section-card"><div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>O'quvchi</th><th>Guruh</th><th>Oy</th><th>Summa</th><th>Muddati</th><th>Holati</th></tr></thead><tbody>
-{% for payment in payments %}<tr><td class="fw-semibold">{{ payment.student.name }}</td><td>{{ payment.student.group.name if payment.student.group else payment.student.course }}</td><td>{{ payment.month }}</td><td class="text-nowrap">{{ '{:,.0f}'.format(payment.amount) }} so'm</td><td>{{ payment.due_date.strftime('%d.%m.%Y') if payment.due_date else '-' }}</td><td><div class="d-flex flex-wrap align-items-center gap-2">{% if payment.effective_status=='paid' %}<span class="badge rounded-pill text-bg-success">To'langan</span>{% elif payment.effective_status=='overdue' %}<span class="badge rounded-pill text-bg-danger">Muddati o'tgan</span>{% else %}<span class="badge rounded-pill text-bg-warning">Kutilmoqda</span>{% endif %}{% if current_user.role == 'admin' and payment.status == 'pending' %}<form method="POST" action="{{ url_for('mark_payment_paid',payment_id=payment.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-success" type="submit">To'landi</button></form>{% endif %}</div></td></tr>
-{% else %}<tr><td colspan="6" class="empty-state">To'lovlar topilmadi.</td></tr>{% endfor %}
-</tbody></table></div>{% if payment_page.pages > 1 %}<nav class="card-body border-top" aria-label="To'lovlar sahifalari"><ul class="pagination pagination-sm mb-0 justify-content-end">{% if payment_page.has_prev %}<li class="page-item"><a class="page-link" href="{{ url_for('payments',page=payment_page.prev_num,status=status_filter) }}">Oldingi</a></li>{% endif %}{% for page_number in payment_page.iter_pages() %}{% if page_number %}<li class="page-item {{ 'active' if page_number == payment_page.page else '' }}"><a class="page-link" href="{{ url_for('payments',page=page_number,status=status_filter) }}">{{ page_number }}</a></li>{% else %}<li class="page-item disabled"><span class="page-link">...</span></li>{% endif %}{% endfor %}{% if payment_page.has_next %}<li class="page-item"><a class="page-link" href="{{ url_for('payments',page=payment_page.next_num,status=status_filter) }}">Keyingi</a></li>{% endif %}</ul></nav>{% endif %}</section>
+<header class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+        <p class="section-kicker mb-1">MOLIYA</p>
+        <h1 class="page-heading mb-0">To'lovlar tarixi</h1>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        {% if current_user.role == 'admin' %}
+        <a class="btn btn-outline-danger" href="{{ url_for('payment_debtors') }}">Qarzdorlar</a>
+        <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal">To'lov qo'shish</button>
+        {% endif %}
+    </div>
+</header>
+
+<section class="card section-card mb-4">
+    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
+            <p class="text-secondary mb-1">Tanlangan filtrlar bo'yicha tushum</p>
+            <p class="h3 mb-0">{{ '{:,.0f}'.format(revenue) }} so'm</p>
+        </div>
+        <form class="row g-2 align-items-end" method="GET">
+            <div class="col-auto">
+                <label class="form-label mb-1" for="from_date">Sanadan</label>
+                <input class="form-control" id="from_date" name="from_date" type="date" value="{{ from_date }}">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1" for="to_date">Sanagacha</label>
+                <input class="form-control" id="to_date" name="to_date" type="date" value="{{ to_date }}">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1" for="student_filter">O'quvchi</label>
+                <select class="form-select" id="student_filter" name="student_id">
+                    <option value="">Barcha o'quvchilar</option>
+                    {% for student in filter_students %}
+                    <option value="{{ student.id }}" {% if student_filter == student.id|string %}selected{% endif %}>{{ student.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1" for="status">Holati</label>
+                <select class="form-select" name="status" id="status">
+                    <option value="">Barcha holatlar</option>
+                    <option value="paid" {% if status_filter == 'paid' %}selected{% endif %}>To'langan</option>
+                    <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Kutilmoqda</option>
+                    <option value="overdue" {% if status_filter == 'overdue' %}selected{% endif %}>Muddati o'tgan</option>
+                </select>
+            </div>
+            <div class="col-auto"><button class="btn btn-outline-secondary" type="submit">Filtrlash</button></div>
+        </form>
+    </div>
+</section>
+
+{% if current_user.role == 'admin' %}
+<div class="modal fade" id="paymentModal" tabindex="-1" aria-labelledby="paymentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                    <h2 class="modal-title fs-5" id="paymentModalLabel">To'lov yozuvini qo'shish</h2>
+                    <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Yopish"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="student_id">O'quvchi</label>
+                            <select class="form-select" id="student_id" name="student_id" required>
+                                <option value="">Tanlang</option>
+                                {% for student in students %}<option value="{{ student.id }}">{{ student.name }} · {{ student.group.name if student.group else student.course }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="amount">Summa</label>
+                            <input class="form-control" id="amount" name="amount" type="number" min="0.01" step="0.01" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="month_covered">Qamrab olingan oy</label>
+                            <input class="form-control" id="month_covered" name="month_covered" type="month" value="{{ today_iso[:7] }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="due_date">To'lov muddati</label>
+                            <input class="form-control" id="due_date" name="due_date" type="date" value="{{ today_iso }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="payment_type">To'lov turi</label>
+                            <select class="form-select" id="payment_type" name="payment_type" required>
+                                <option value="cash">Naqd</option>
+                                <option value="card">Karta</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="payment_date">To'lov sanasi</label>
+                            <input class="form-control" id="payment_date" name="payment_date" type="date" value="{{ today_iso }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="receipt_number">Chek raqami</label>
+                            <input class="form-control" id="receipt_number" name="receipt_number" maxlength="40">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="new_status">Holati</label>
+                            <select class="form-select" id="new_status" name="status" required>
+                                <option value="paid">To'langan</option>
+                                <option value="pending">Kutilmoqda</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button class="btn btn-primary" type="submit">Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<section class="card section-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>O'quvchi</th><th>Oy</th><th>Summa</th><th>Usul</th><th>To'lov sanasi</th><th>Chek</th><th>Holati</th></tr></thead>
+            <tbody>
+            {% for payment in payments %}
+            <tr>
+                <td class="fw-semibold">{{ payment.student.name }}</td>
+                <td>{{ payment.month_covered }}</td>
+                <td class="text-nowrap">{{ '{:,.0f}'.format(payment.amount) }} so'm</td>
+                <td>{{ 'Karta' if payment.payment_type == 'card' else 'Naqd' }}</td>
+                <td>{{ payment.payment_date.strftime('%d.%m.%Y') if payment.payment_date else '-' }}</td>
+                <td>{{ payment.receipt_number or '-' }}</td>
+                <td>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        {% if payment.effective_status == 'paid' %}<span class="badge text-bg-success">To'langan</span>
+                        {% elif payment.effective_status == 'overdue' %}<span class="badge text-bg-danger">Muddati o'tgan</span>
+                        {% else %}<span class="badge text-bg-warning">Kutilmoqda</span>{% endif %}
+                        {% if current_user.role == 'admin' and payment.status == 'pending' %}
+                        <form method="POST" action="{{ url_for('mark_payment_paid', payment_id=payment.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-success" type="submit">To'landi</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% else %}<tr><td colspan="7" class="empty-state">To'lovlar topilmadi.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if payment_page.pages > 1 %}
+    <nav class="card-body border-top" aria-label="To'lovlar sahifalari">
+        <ul class="pagination pagination-sm mb-0 justify-content-end">
+            {% if payment_page.has_prev %}<li class="page-item"><a class="page-link" href="{{ url_for('payments', page=payment_page.prev_num, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter) }}">Oldingi</a></li>{% endif %}
+            {% for page_number in payment_page.iter_pages() %}
+                {% if page_number %}<li class="page-item {{ 'active' if page_number == payment_page.page else '' }}"><a class="page-link" href="{{ url_for('payments', page=page_number, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter) }}">{{ page_number }}</a></li>
+                {% else %}<li class="page-item disabled"><span class="page-link">...</span></li>{% endif %}
+            {% endfor %}
+            {% if payment_page.has_next %}<li class="page-item"><a class="page-link" href="{{ url_for('payments', page=payment_page.next_num, status=status_filter, from_date=from_date, to_date=to_date, student_id=student_filter) }}">Keyingi</a></li>{% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</section>
 {% endblock %}

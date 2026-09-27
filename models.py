@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 
 from flask_login import UserMixin
 from sqlalchemy import CheckConstraint
+from sqlalchemy.orm import synonym
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db
@@ -10,6 +11,12 @@ parent_students = db.Table(
     'parent_students',
     db.Column('user_id', db.Integer, db.ForeignKey('user_account.id', ondelete='CASCADE'), primary_key=True),
     db.Column('student_id', db.Integer, db.ForeignKey('student.id', ondelete='CASCADE'), primary_key=True),
+)
+
+student_groups = db.Table(
+    'student_groups',
+    db.Column('student_id', db.Integer, db.ForeignKey('student.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('group_id', db.Integer, db.ForeignKey('learning_group.id', ondelete='CASCADE'), primary_key=True),
 )
 
 
@@ -45,6 +52,9 @@ class User(UserMixin, db.Model):
 
 class Student(db.Model):
     __tablename__ = 'student'
+    __table_args__ = (
+        CheckConstraint("payment_status IN ('paid', 'pending', 'overdue')", name='ck_student_payment_status'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, index=True)
@@ -52,12 +62,26 @@ class Student(db.Model):
     phone = db.Column(db.String(20), nullable=False, index=True)
     enrollment_date = db.Column(db.Date, nullable=True, default=date.today)
     status = db.Column(db.String(20), nullable=False, default='active')
+    balance = db.Column(db.Numeric(12, 2), nullable=False, default=0, server_default='0')
+    payment_status = db.Column(db.String(20), nullable=False, default='paid', server_default='paid', index=True)
     group_id = db.Column(db.Integer, db.ForeignKey('learning_group.id'), nullable=True, index=True)
 
     group = db.relationship('Group', back_populates='students')
+    groups = db.relationship('Group', secondary=student_groups, back_populates='enrolled_students')
     parents = db.relationship('User', secondary=parent_students, back_populates='students')
     payments = db.relationship('Payment', back_populates='student', cascade='all, delete-orphan')
     attendance_records = db.relationship('Attendance', back_populates='student', cascade='all, delete-orphan')
+
+
+class Course(db.Model):
+    __tablename__ = 'course'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(120), nullable=False, unique=True)
+    price = db.Column(db.Numeric(12, 2), nullable=False, default=0, server_default='0')
+    duration_months = db.Column(db.Integer, nullable=False, default=1, server_default='1')
+
+    groups = db.relationship('Group', back_populates='course')
 
 
 class Group(db.Model):
@@ -65,15 +89,23 @@ class Group(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
-    course_name = db.Column(db.String(100), nullable=False)
+    title = synonym('name')
+    course_name = db.Column(db.String(100), nullable=False, default='')
+    course_id = db.Column(db.Integer, db.ForeignKey('course.id', ondelete='SET NULL'), nullable=True, index=True)
     teacher_id = db.Column(db.Integer, db.ForeignKey('user_account.id', ondelete='SET NULL'), nullable=True, index=True)
     schedule = db.Column(db.String(250), nullable=False, default='')
+    room_number = db.Column(db.String(80), nullable=False, default='', server_default='')
+    schedule_days = db.Column(db.String(20), nullable=False, default='', server_default='')
+    start_time = db.Column(db.Time, nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     teacher = db.relationship('User', back_populates='teaching_groups', foreign_keys=[teacher_id])
+    course = db.relationship('Course', back_populates='groups')
     students = db.relationship('Student', back_populates='group')
+    enrolled_students = db.relationship('Student', secondary=student_groups, back_populates='groups')
     sessions = db.relationship('ClassSession', back_populates='group', cascade='all, delete-orphan')
+    attendance_records = db.relationship('Attendance', back_populates='group', cascade='all, delete-orphan')
 
 
 class ClassSession(db.Model):
@@ -93,30 +125,45 @@ class Attendance(db.Model):
     __tablename__ = 'attendance_record'
     __table_args__ = (
         db.UniqueConstraint('student_id', 'session_id', name='uq_attendance_student_session'),
-        CheckConstraint("status IN ('present', 'absent', 'late')", name='ck_attendance_status'),
+        CheckConstraint("status IN ('present', 'absent', 'late', 'excused')", name='ck_attendance_status'),
+        db.Index(
+            'uq_attendance_daily_student_group_date', 'student_id', 'group_id', 'session_date',
+            unique=True,
+            sqlite_where=db.text('session_id IS NULL'),
+            postgresql_where=db.text('session_id IS NULL'),
+        ),
     )
 
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('student.id', ondelete='CASCADE'), nullable=False, index=True)
-    session_id = db.Column(db.Integer, db.ForeignKey('class_session.id', ondelete='CASCADE'), nullable=False, index=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('class_session.id', ondelete='CASCADE'), nullable=True, index=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('learning_group.id', ondelete='CASCADE'), nullable=False, index=True)
+    session_date = db.Column(db.Date, nullable=False, index=True)
     status = db.Column(db.String(10), nullable=False)
+    notes = db.Column(db.Text, nullable=False, default='', server_default='')
     marked_by_id = db.Column(db.Integer, db.ForeignKey('user_account.id', ondelete='SET NULL'), nullable=True)
     marked_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     student = db.relationship('Student', back_populates='attendance_records')
     session = db.relationship('ClassSession', back_populates='attendances')
+    group = db.relationship('Group', back_populates='attendance_records')
 
 
 class Payment(db.Model):
     __tablename__ = 'payment'
     __table_args__ = (
         CheckConstraint("status IN ('paid', 'pending')", name='ck_payment_status'),
+        CheckConstraint("payment_type IN ('cash', 'card')", name='ck_payment_type'),
     )
 
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False, index=True)
     amount = db.Column(db.Numeric(12, 2), nullable=False)
+    payment_type = db.Column(db.String(10), nullable=False, default='cash', server_default='cash')
+    payment_date = db.Column(db.Date, nullable=True, index=True)
     month = db.Column(db.String(7), nullable=False, index=True)
+    month_covered = synonym('month')
+    receipt_number = db.Column(db.String(40), nullable=True, unique=True, index=True)
     status = db.Column(db.String(20), nullable=False, default='pending', index=True)
     due_date = db.Column(db.Date, nullable=True, index=True)
     paid_at = db.Column(db.DateTime(timezone=True), nullable=True)

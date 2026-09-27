@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Qarzdorlar | Crm_nurmakon{% endblock %}
+{% block content %}
+<header class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+        <p class="section-kicker mb-1">MOLIYA</p>
+        <h1 class="page-heading mb-0">Muddati o'tgan to'lovlar</h1>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('payments') }}">To'lovlar tarixiga qaytish</a>
+</header>
+<section class="card section-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>O'quvchi</th><th>Guruh</th><th>Umumiy qarz</th><th>Muddati o'tgan summa</th><th>Eng yaqin o'tgan muddat</th><th>Holati</th></tr></thead>
+            <tbody>
+            {% for student in students %}
+                {% set overdue = student.payments|selectattr('effective_status', 'equalto', 'overdue')|list %}
+                {% set overdue_total = overdue|sum(attribute='amount') %}
+                {% set dates = overdue|selectattr('due_date')|map(attribute='due_date')|list %}
+                <tr>
+                    <td class="fw-semibold">{{ student.name }}</td>
+                    <td>{{ student.group.name if student.group else student.course }}</td>
+                    <td class="text-nowrap">{{ '{:,.0f}'.format(student.balance) }} so'm</td>
+                    <td class="text-nowrap">{{ '{:,.0f}'.format(overdue_total) }} so'm</td>
+                    <td>{{ (dates|min).strftime('%d.%m.%Y') if dates else '-' }}</td>
+                    <td><span class="badge text-bg-danger">Muddati o'tgan</span></td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6" class="empty-state">Muddati o'tgan qarzdorlar yo'q.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
