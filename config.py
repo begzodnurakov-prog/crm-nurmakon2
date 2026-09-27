@@ -5,9 +5,9 @@ import secrets
 def _database_url():
     url = os.environ.get('DATABASE_URL', 'sqlite:///nurmakon.db')
     if url.startswith('postgres://'):
-        return 'postgresql+psycopg://' + url[len('postgres://'):]
+        return 'postgresql+psycopg2://' + url[len('postgres://'):]
     if url.startswith('postgresql://'):
-        return 'postgresql+psycopg://' + url[len('postgresql://'):]
+        return 'postgresql+psycopg2://' + url[len('postgresql://'):]
     return url
 
 
